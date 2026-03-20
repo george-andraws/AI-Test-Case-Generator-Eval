@@ -32,6 +32,7 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
   span.setAttribute("gen_ai.request.temperature", req.temperature);
 
   // ── Langfuse observation (generation) ────────────────────────────────────
+  span.setAttribute("langfuse.observation.type", "GENERATION");
   span.setAttribute("langfuse.observation.model.name", req.model);
   span.setAttribute(
     "langfuse.observation.model.parameters",
@@ -88,7 +89,7 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
   // ── Record response attributes ────────────────────────────────────────────
   span.setAttribute("gen_ai.usage.input_tokens", response.tokenUsage.input);
   span.setAttribute("gen_ai.usage.output_tokens", response.tokenUsage.output);
-  span.setAttribute("langfuse.observation.output", response.text);
+  span.setAttribute("langfuse.observation.output", JSON.stringify(response.text));
   span.setAttribute(
     "langfuse.observation.usage_details",
     JSON.stringify({
