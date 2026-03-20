@@ -45,7 +45,9 @@ const requests: LLMRequest[] = [
   },
   {
     provider: "google",
-    model: "gemini-2.5-flash-lite",
+    model: "gemini-3.1-flash-lite-preview",
+    //model: "gemini-3-flash-preview",    // next best fallback option
+    //model: "gemini-2.0-flash-lite-001", // unavailable? cheap for dev and testing
     systemPrompt: SYSTEM_PROMPT,
     userPrompt: USER_PROMPT,
     maxTokens: 128,
