@@ -38,15 +38,15 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
     "langfuse.observation.model.parameters",
     JSON.stringify({ maxTokens: req.maxTokens, temperature: req.temperature })
   );
-  span.setAttribute(
-    "langfuse.observation.input",
-    JSON.stringify([
-      { role: "system", content: req.systemPrompt },
-      { role: "user", content: req.userPrompt },
-    ])
-  );
+  const inputJson = JSON.stringify([
+    { role: "system", content: req.systemPrompt },
+    { role: "user", content: req.userPrompt },
+  ]);
+  span.setAttribute("langfuse.observation.input", inputJson);
+  span.setAttribute("langfuse.trace.input", inputJson);
 
   // ── Langfuse trace-level metadata ─────────────────────────────────────────
+  span.setAttribute("langfuse.trace.name", spanName);
   if (ctx) {
     const tags = [ctx.role, req.provider, req.model, ...(ctx.tags ?? [])];
     span.setAttribute("langfuse.trace.tags", JSON.stringify(tags));
@@ -90,6 +90,7 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
   span.setAttribute("gen_ai.usage.input_tokens", response.tokenUsage.input);
   span.setAttribute("gen_ai.usage.output_tokens", response.tokenUsage.output);
   span.setAttribute("langfuse.observation.output", JSON.stringify(response.text));
+  span.setAttribute("langfuse.trace.output", JSON.stringify(response.text));
   span.setAttribute(
     "langfuse.observation.usage_details",
     JSON.stringify({
