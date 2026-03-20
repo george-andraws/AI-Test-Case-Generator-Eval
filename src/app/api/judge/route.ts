@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import config from "@/lib/config";
-import { callLLM } from "@/lib/llm";
+import { callLLM, flushSpans } from "@/lib/llm";
 
 export const maxDuration = 120;
 
@@ -183,6 +183,7 @@ Respond in this exact JSON format and nothing else:
     }
   });
 
+  await flushSpans();
   return NextResponse.json({ results });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

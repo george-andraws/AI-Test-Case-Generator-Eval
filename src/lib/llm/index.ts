@@ -6,7 +6,7 @@ import { callGoogle } from "./google";
 import type { LLMRequest, LLMResponse } from "./types";
 
 export type { LLMRequest, LLMResponse, TokenUsage, TraceContext } from "./types";
-export { initTracing, flushTracing, getLangfuseClient } from "./tracing";
+export { initTracing, flushTracing, flushSpans, getLangfuseClient } from "./tracing";
 export { scoreTrace } from "./scores";
 export type { ScoreParams, ScoreSource } from "./scores";
 

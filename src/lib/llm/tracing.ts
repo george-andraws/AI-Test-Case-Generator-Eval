@@ -59,6 +59,15 @@ export function getLangfuseClient(): LangfuseClient {
   return _client;
 }
 
+/**
+ * Force-flush pending spans to Langfuse without shutting down the SDK.
+ * Call this at the end of each API route to ensure spans are exported before
+ * the Next.js worker recycles.
+ */
+export async function flushSpans(): Promise<void> {
+  if (_sdk) await _sdk.forceFlush();
+}
+
 /** Flush all buffered spans and scores, then shut down the SDK. */
 export async function flushTracing(): Promise<void> {
   if (_sdk) {
