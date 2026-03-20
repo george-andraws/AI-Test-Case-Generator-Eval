@@ -5,6 +5,7 @@ import { LangfuseClient } from "@langfuse/client";
 import config from "@/lib/config";
 
 let _sdk: NodeSDK | null = null;
+let _processor: LangfuseSpanProcessor | null = null;
 let _client: LangfuseClient | null = null;
 
 export function initTracing(): void {
@@ -20,25 +21,21 @@ export function initTracing(): void {
     );
   }
 
-  _sdk = new NodeSDK({
-    spanProcessors: [
-      new LangfuseSpanProcessor({
-        publicKey,
-        secretKey,
-        baseUrl: lf.baseUrl,
-        // "immediate" is better for scripts and serverless;
-        // switch to "batched" for long-running server processes
-        exportMode: "immediate",
-      }),
-    ],
+  _processor = new LangfuseSpanProcessor({
+    publicKey,
+    secretKey,
+    baseUrl: lf.baseUrl,
+    exportMode: "immediate",
   });
 
+  _sdk = new NodeSDK({ spanProcessors: [_processor] });
   _sdk.start();
 
   _client = new LangfuseClient({ publicKey, secretKey, baseUrl: lf.baseUrl });
 }
 
 export function getTracer() {
+  if (!_sdk) initTracing();
   return trace.getTracer("test-case-eval-tool");
 }
 
@@ -65,7 +62,7 @@ export function getLangfuseClient(): LangfuseClient {
  * the Next.js worker recycles.
  */
 export async function flushSpans(): Promise<void> {
-  if (_sdk) await _sdk.forceFlush();
+  if (_processor) await _processor.forceFlush();
 }
 
 /** Flush all buffered spans and scores, then shut down the SDK. */
@@ -73,6 +70,7 @@ export async function flushTracing(): Promise<void> {
   if (_sdk) {
     await _sdk.shutdown();
     _sdk = null;
+    _processor = null;
     _client = null;
   }
 }
