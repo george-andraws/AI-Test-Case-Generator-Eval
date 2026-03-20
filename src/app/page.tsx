@@ -1,0 +1,621 @@
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import config from "@/lib/config";
+import type { RevisionData } from "@/lib/storage";
+import { ModelOutputPanel, type GeneratorPanel } from "./components/ModelOutputPanel";
+import { type JudgePanelEntry } from "./components/JudgeScoreSection";
+import { ScoringTrends } from "./components/ScoringTrends";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface FormState {
+  testMethodology: string;
+  url: string;
+  productRequirements: string;
+  revisionNotes: string;
+  judgePrompt: string;
+}
+
+interface ProductSummary {
+  url: string;
+  slug: string;
+  revisionCount: number;
+}
+
+type Phase = "idle" | "generating" | "judging" | "done";
+type SubmitStatus = "idle" | "submitting" | "done" | "error";
+
+// judgeId → generatorId → entry
+type JudgeResultsMap = Record<string, Record<string, JudgePanelEntry>>;
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const EMPTY_FORM: FormState = {
+  testMethodology: "",
+  url: "",
+  productRequirements: "",
+  revisionNotes: "",
+  judgePrompt: "",
+};
+
+// ── Small helpers ─────────────────────────────────────────────────────────────
+
+function Label({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
+  return (
+    <label htmlFor={htmlFor} className="block text-sm font-medium text-gray-700 mb-1.5">
+      {children}
+    </label>
+  );
+}
+
+function Textarea({
+  id, rows, value, onChange, placeholder, disabled,
+}: {
+  id: string; rows: number; value: string;
+  onChange: (v: string) => void; placeholder: string; disabled?: boolean;
+}) {
+  return (
+    <textarea
+      id={id} rows={rows} value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder} disabled={disabled}
+      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400 resize-y"
+    />
+  );
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+export default function Page() {
+  // ── Form state ────────────────────────────────────────────────────────────
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+
+  // ── Product / revision selectors ─────────────────────────────────────────
+  const [products, setProducts] = useState<ProductSummary[]>([]);
+  const [selectedUrl, setSelectedUrl] = useState<string>("");
+  const [revisions, setRevisions] = useState<RevisionData[]>([]);
+  const [selectedRevision, setSelectedRevision] = useState<number | "new">("new");
+
+  // ── Generation + judging ─────────────────────────────────────────────────
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [panels, setPanels] = useState<GeneratorPanel[]>([]);
+  const [judgeResults, setJudgeResults] = useState<JudgeResultsMap>({});
+
+  // ── Score submission ──────────────────────────────────────────────────────
+  const [submitStatus, setSubmitStatus] = useState<SubmitStatus>("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const nextRevisionNumber = selectedUrl && revisions.length > 0 ? revisions.length + 1 : 1;
+
+  const successfulPanels = panels.filter((p) => p.status === "success");
+  const allScored =
+    successfulPanels.length > 0 &&
+    successfulPanels.every((p) => p.humanScore !== undefined);
+
+  const canGenerate =
+    form.url.trim().length > 0 &&
+    (form.testMethodology.trim().length > 0 || form.productRequirements.trim().length > 0) &&
+    phase !== "generating" &&
+    phase !== "judging";
+
+  // ── Data fetching ─────────────────────────────────────────────────────────
+  const fetchProducts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/products");
+      if (!res.ok) return;
+      const data = await res.json();
+      setProducts(data.products ?? []);
+    } catch { /* non-critical */ }
+  }, []);
+
+  const fetchRevisions = useCallback(async (url: string) => {
+    try {
+      const res = await fetch(`/api/data?url=${encodeURIComponent(url)}`);
+      if (res.status === 404) { setRevisions([]); return; }
+      if (!res.ok) return;
+      setRevisions(await res.json());
+    } catch { setRevisions([]); }
+  }, []);
+
+  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+
+  // When revisions load, default to the latest
+  useEffect(() => {
+    if (revisions.length > 0) {
+      const latest = revisions[revisions.length - 1];
+      setSelectedRevision(latest.revision);
+      loadRevisionIntoForm(latest);
+    } else {
+      setSelectedRevision("new");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revisions]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
+
+  function loadRevisionIntoForm(rev: RevisionData) {
+    setForm({
+      testMethodology: rev.prompts.testMethodology,
+      url: rev.url,
+      productRequirements: rev.prompts.productRequirements,
+      revisionNotes: rev.revisionNotes,
+      judgePrompt: rev.prompts.judgePrompt,
+    });
+  }
+
+  async function handleProductSelect(url: string) {
+    setSelectedUrl(url);
+    setPhase("idle");
+    setPanels([]);
+    setJudgeResults({});
+    setSubmitStatus("idle");
+    if (!url) { setForm(EMPTY_FORM); setRevisions([]); setSelectedRevision("new"); return; }
+    await fetchRevisions(url);
+  }
+
+  function handleRevisionSelect(value: string) {
+    if (value === "new") {
+      setSelectedRevision("new");
+      setForm((prev) => ({ ...EMPTY_FORM, url: prev.url }));
+      return;
+    }
+    const revNum = parseInt(value, 10);
+    const rev = revisions.find((r) => r.revision === revNum);
+    if (rev) { setSelectedRevision(revNum); loadRevisionIntoForm(rev); }
+  }
+
+  function setField(field: keyof FormState) {
+    return (value: string) => setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function updateHumanScore(panelId: string, score: number) {
+    setPanels((prev) =>
+      prev.map((p) => (p.id === panelId ? { ...p, humanScore: score } : p))
+    );
+  }
+
+  // ── Generate + judge flow ─────────────────────────────────────────────────
+
+  async function handleGenerate() {
+    setPhase("generating");
+    setSubmitStatus("idle");
+    setSubmitError(null);
+    setJudgeResults({});
+
+    // Reset all panels to loading
+    setPanels(
+      config.generators.map((m) => ({
+        id: m.id, name: m.name, model: m.model,
+        status: "loading",
+      }))
+    );
+
+    // Fire one request per generator model in parallel
+    const generatorPromises = config.generators.map(async (model) => {
+      try {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: form.url,
+            testMethodology: form.testMethodology,
+            productRequirements: form.productRequirements,
+            modelId: model.id,
+          }),
+        });
+        const data = await res.json();
+        const result = res.ok ? data.results?.[model.id] : null;
+
+        setPanels((prev) =>
+          prev.map((p) =>
+            p.id !== model.id ? p : result?.success
+              ? {
+                  ...p, status: "success",
+                  output: result.output,
+                  tokenUsage: result.tokenUsage,
+                  latencyMs: result.latencyMs,
+                  langfuseTraceId: result.langfuseTraceId,
+                }
+              : {
+                  ...p, status: "error",
+                  error: result?.error ?? data.error ?? "Request failed",
+                }
+          )
+        );
+
+        return result?.success ? { model, result } : null;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setPanels((prev) =>
+          prev.map((p) => (p.id === model.id ? { ...p, status: "error", error: message } : p))
+        );
+        return null;
+      }
+    });
+
+    const genOutcomes = await Promise.allSettled(generatorPromises);
+    const successful = genOutcomes
+      .filter(
+        (r): r is PromiseFulfilledResult<{ model: typeof config.generators[0]; result: { output: string; langfuseTraceId: string } }> =>
+          r.status === "fulfilled" && r.value !== null
+      )
+      .map((r) => r.value);
+
+    if (successful.length === 0) { setPhase("done"); return; }
+
+    // ── Kick off judging ───────────────────────────────────────────────────
+    setPhase("judging");
+
+    // Initialize all judge entries as loading
+    setJudgeResults(() => {
+      const init: JudgeResultsMap = {};
+      for (const judge of config.judges) {
+        init[judge.id] = {};
+        for (const { model } of successful) {
+          init[judge.id][model.id] = { status: "loading" };
+        }
+      }
+      return init;
+    });
+
+    // Fire all judge × generator combinations in parallel
+    const judgePromises = config.judges.flatMap((judge) =>
+      successful.map(async ({ model, result }) => {
+        try {
+          const res = await fetch("/api/judge", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              judgeId: judge.id,
+              url: form.url,
+              productRequirements: form.productRequirements,
+              judgePrompt: form.judgePrompt,
+              generations: { [model.id]: { modelName: model.name, output: result.output } },
+            }),
+          });
+          const data = await res.json();
+          const jr = res.ok ? data.results?.[judge.id]?.[model.id] : null;
+
+          setJudgeResults((prev) => ({
+            ...prev,
+            [judge.id]: {
+              ...prev[judge.id],
+              [model.id]: jr
+                ? {
+                    status: jr.success ? "success" : "error",
+                    score: jr.score,
+                    feedback: jr.feedback,
+                    selfEvaluation: jr.selfEvaluation,
+                    langfuseTraceId: jr.langfuseTraceId,
+                    error: jr.error,
+                  }
+                : { status: "error", error: data.error ?? "Request failed" },
+            },
+          }));
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setJudgeResults((prev) => ({
+            ...prev,
+            [judge.id]: {
+              ...prev[judge.id],
+              [model.id]: { status: "error", error: message },
+            },
+          }));
+        }
+      })
+    );
+
+    await Promise.allSettled(judgePromises);
+    setPhase("done");
+  }
+
+  // ── Submit human scores to Langfuse + save to disk ────────────────────────
+
+  async function handleSubmitScores() {
+    setSubmitStatus("submitting");
+    setSubmitError(null);
+
+    // Build Langfuse scores payload (only successful panels with traceIds)
+    const langfuseScores: Record<string, { score: number; langfuseTraceId: string }> = {};
+    for (const panel of successfulPanels) {
+      if (panel.humanScore !== undefined && panel.langfuseTraceId) {
+        langfuseScores[panel.id] = { score: panel.humanScore, langfuseTraceId: panel.langfuseTraceId };
+      }
+    }
+
+    let langfuseOk = true;
+    try {
+      const res = await fetch("/api/scores", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scores: langfuseScores }),
+      });
+      if (!res.ok) langfuseOk = false;
+    } catch {
+      langfuseOk = false;
+    }
+
+    // Build generations map — only store successful completions
+    const generations: RevisionData["generations"] = {};
+    for (const panel of successfulPanels) {
+      if (panel.output && panel.tokenUsage && panel.latencyMs && panel.langfuseTraceId) {
+        generations[panel.id] = {
+          output: panel.output,
+          tokenUsage: panel.tokenUsage,
+          latencyMs: panel.latencyMs,
+          langfuseTraceId: panel.langfuseTraceId,
+        };
+      }
+    }
+
+    // Build scores.judges — only store successful judge results
+    const judgesScores: RevisionData["scores"]["judges"] = {};
+    for (const [judgeId, genMap] of Object.entries(judgeResults)) {
+      for (const [genId, entry] of Object.entries(genMap)) {
+        if (entry.status === "success" && entry.score !== undefined && entry.feedback && entry.langfuseTraceId) {
+          if (!judgesScores[judgeId]) judgesScores[judgeId] = {};
+          judgesScores[judgeId][genId] = {
+            score: entry.score,
+            feedback: entry.feedback,
+            langfuseTraceId: entry.langfuseTraceId,
+          };
+        }
+      }
+    }
+
+    // Build scores.human — all successful panels, null for unscored
+    const humanScores: RevisionData["scores"]["human"] = {};
+    for (const panel of successfulPanels) {
+      humanScores[panel.id] = panel.humanScore ?? null;
+    }
+
+    const revisionPayload: Omit<RevisionData, "revision" | "timestamp"> = {
+      url: form.url,
+      prompts: {
+        testMethodology: form.testMethodology,
+        productRequirements: form.productRequirements,
+        judgePrompt: form.judgePrompt,
+      },
+      revisionNotes: form.revisionNotes,
+      images: [],
+      configSnapshot: {
+        generators: config.generators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+        judges: config.judges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+      },
+      generations,
+      scores: { human: humanScores, judges: judgesScores },
+    };
+
+    try {
+      await fetch("/api/data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(revisionPayload),
+      });
+      // Refresh products + revisions so trends update, and select this URL
+      setSelectedUrl(form.url);
+      await fetchRevisions(form.url);
+      await fetchProducts();
+    } catch { /* disk save failed — still show result */ }
+
+    if (langfuseOk) {
+      setSubmitStatus("done");
+    } else {
+      setSubmitStatus("error");
+      setSubmitError("Scores saved locally but could not be sent to Langfuse.");
+    }
+  }
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  const isRunning = phase === "generating" || phase === "judging";
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="mx-auto max-w-screen-xl px-4 py-10 sm:px-6 lg:px-8">
+
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-2xl font-semibold text-gray-900">Test Case Evaluation Tool</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Generate and evaluate test cases across multiple AI models.
+          </p>
+        </div>
+
+        {/* ── Section 1: Product & Revision Selectors ── */}
+        <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Product &amp; Revision
+          </h2>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+            <div className="flex-1">
+              <Label htmlFor="product-select">Product</Label>
+              <select
+                id="product-select"
+                value={selectedUrl}
+                onChange={(e) => handleProductSelect(e.target.value)}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">New product</option>
+                {products.map((p) => (
+                  <option key={p.slug} value={p.url}>
+                    {p.url} ({p.revisionCount} revision{p.revisionCount !== 1 ? "s" : ""})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="w-full sm:w-56">
+              <Label htmlFor="revision-select">Revision</Label>
+              <select
+                id="revision-select"
+                value={selectedRevision === "new" ? "new" : String(selectedRevision)}
+                onChange={(e) => handleRevisionSelect(e.target.value)}
+                disabled={!selectedUrl}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+              >
+                {selectedUrl && revisions.length > 0 ? (
+                  revisions.map((r) => (
+                    <option key={r.revision} value={String(r.revision)}>
+                      Revision {r.revision}
+                      {r.revisionNotes ? ` — ${r.revisionNotes.slice(0, 40)}` : ""}
+                    </option>
+                  ))
+                ) : (
+                  <option value="new">New</option>
+                )}
+              </select>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-400">
+            Next submission will create:{" "}
+            <span className="font-medium text-gray-600">Revision {nextRevisionNumber}</span>
+          </p>
+        </div>
+
+        {/* ── Section 2: Input Fields ── */}
+        <div className="mb-6 rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="mb-5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Inputs
+          </h2>
+          <div className="space-y-6">
+            <div>
+              <Label htmlFor="testMethodology">Test methodology &amp; direction</Label>
+              <Textarea
+                id="testMethodology" rows={7} value={form.testMethodology}
+                onChange={setField("testMethodology")} disabled={isRunning}
+                placeholder="Instructions about test case quality, methodologies (equivalence classes, boundary conditions, pairwise testing), output format, etc."
+              />
+              <p className="mt-1 text-xs text-gray-400">System prompt sent to generator models.</p>
+            </div>
+            <div>
+              <Label htmlFor="url">Application under test (URL)</Label>
+              <input
+                id="url" type="text" value={form.url} disabled={isRunning}
+                onChange={(e) => setField("url")(e.target.value)}
+                placeholder="http://localhost:3000"
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
+              />
+              <p className="mt-1 text-xs text-gray-400">Metadata only — models do not browse this URL.</p>
+            </div>
+            <div>
+              <Label htmlFor="productRequirements">Product requirements</Label>
+              <Textarea
+                id="productRequirements" rows={8} value={form.productRequirements}
+                onChange={setField("productRequirements")} disabled={isRunning}
+                placeholder="Paste your business requirements, acceptance criteria, feature descriptions..."
+              />
+              <p className="mt-1 text-xs text-gray-400">Combined with the URL to form the user message.</p>
+            </div>
+            <div>
+              <Label htmlFor="revisionNotes">Revision notes</Label>
+              <Textarea
+                id="revisionNotes" rows={2} value={form.revisionNotes}
+                onChange={setField("revisionNotes")} disabled={isRunning}
+                placeholder="What changed in this version? e.g., 'Added boundary condition guidance to methodology prompt'"
+              />
+              <p className="mt-1 text-xs text-gray-400">Stored with this revision. Not sent to any model.</p>
+            </div>
+            <div>
+              <Label htmlFor="judgePrompt">LLM-as-judge prompt</Label>
+              <Textarea
+                id="judgePrompt" rows={4} value={form.judgePrompt}
+                onChange={setField("judgePrompt")} disabled={isRunning}
+                placeholder="Instructions for judging test case quality. The judge will receive the requirements, the generated test cases, and this prompt."
+              />
+              <p className="mt-1 text-xs text-gray-400">System prompt sent to judge models.</p>
+            </div>
+          </div>
+
+          {/* Generate button */}
+          <div className="mt-8 border-t border-gray-100 pt-6 flex items-center gap-4">
+            <button
+              onClick={handleGenerate}
+              disabled={!canGenerate}
+              className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isRunning && (
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              )}
+              {phase === "generating" ? "Generating…" : phase === "judging" ? "Judging…" : "Generate test cases"}
+            </button>
+            {isRunning && (
+              <span className="text-sm text-gray-500">
+                {phase === "generating"
+                  ? `Running ${config.generators.length} generator models in parallel…`
+                  : `Running ${config.judges.length} judge models…`}
+              </span>
+            )}
+            {!canGenerate && !isRunning && (
+              <span className="text-xs text-gray-400">Enter a URL and at least one prompt field.</span>
+            )}
+          </div>
+        </div>
+
+        {/* ── Section 3: Model Outputs ── */}
+        {panels.length > 0 && (
+          <div className="mb-6">
+            <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-gray-400">
+              Model Outputs
+            </h2>
+
+            {/* Horizontally scrollable row of panels */}
+            <div className="flex gap-4 overflow-x-auto pb-3">
+              {panels.map((panel) => (
+                <ModelOutputPanel
+                  key={panel.id}
+                  panel={panel}
+                  judgeModels={config.judges}
+                  judgeResults={
+                    Object.fromEntries(
+                      config.judges.map((j) => [j.id, judgeResults[j.id]?.[panel.id] ?? { status: "idle" }])
+                    ) as Record<string, JudgePanelEntry>
+                  }
+                  onScoreChange={(score) => updateHumanScore(panel.id, score)}
+                />
+              ))}
+            </div>
+
+            {/* Submit scores */}
+            {phase === "done" && successfulPanels.length > 0 && (
+              <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <button
+                  onClick={handleSubmitScores}
+                  disabled={!allScored || submitStatus === "submitting" || submitStatus === "done"}
+                  className="inline-flex items-center gap-2 rounded-md bg-green-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {submitStatus === "submitting" && (
+                    <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  )}
+                  {submitStatus === "done"
+                    ? "Scores submitted ✓"
+                    : submitStatus === "submitting"
+                    ? "Submitting…"
+                    : "Submit scores to Langfuse"}
+                </button>
+
+                {!allScored && submitStatus === "idle" && (
+                  <p className="text-xs text-gray-400">
+                    Score all {successfulPanels.length} model output{successfulPanels.length !== 1 ? "s" : ""} to enable.
+                  </p>
+                )}
+                {submitStatus === "error" && submitError && (
+                  <p className="text-sm text-amber-600">{submitError}</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Section 4: Scoring Trends ── */}
+        <ScoringTrends
+          revisions={revisions}
+          generatorModels={config.generators}
+          judgeModels={config.judges}
+        />
+
+      </div>
+    </div>
+  );
+}
