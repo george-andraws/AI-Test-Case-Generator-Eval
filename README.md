@@ -2,6 +2,18 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+Add .env.local file with API keys:
+```bash
+# Generator / Judge API keys
+ANTHROPIC_API_KEY=""
+OPENAI_API_KEY=""
+GOOGLE_API_KEY=""
+
+# Langfuse observability
+LANGFUSE_PUBLIC_KEY=""
+LANGFUSE_SECRET_KEY=""
+```
+
 First, run the development server:
 
 ```bash
