@@ -17,6 +17,7 @@ const config: Config = {
       testMatch: [
         '<rootDir>/__tests__/api/**/*.test.ts',
         '<rootDir>/__tests__/lib/**/*.test.ts',
+        '<rootDir>/__tests__/scripts/**/*.test.ts',
       ],
       moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
       clearMocks: true,

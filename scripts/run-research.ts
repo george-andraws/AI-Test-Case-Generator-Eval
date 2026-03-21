@@ -1,0 +1,203 @@
+/**
+ * Runs multiple experiment variations sequentially from a research protocol file.
+ *
+ * Usage:
+ *   npm run research <path-to-research.json>
+ *
+ * Each variation overrides testMethodology (and optionally revisionNotes) while
+ * sharing the URL, productRequirements, judgePrompt, and imagePaths from the
+ * protocol root. Variations run one at a time with a 5-second pause between
+ * them to avoid rate-limit bursts.
+ *
+ * A comparison summary table is printed at the end showing average judge scores
+ * per variation per generator.
+ */
+import { config as loadEnv } from "dotenv";
+loadEnv({ path: ".env.local" });
+
+import fs from "fs/promises";
+import path from "path";
+
+import appConfig from "../src/lib/config";
+import { initTracing, flushTracing } from "../src/lib/llm";
+import { runExperiment, printSummary } from "./run-experiment";
+import type { ExperimentConfig, ExperimentResult } from "./run-experiment";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+export interface ResearchVariation {
+  name: string;
+  testMethodology: string;
+  /** Overrides the protocol-level revisionNotes when set. */
+  revisionNotes?: string;
+}
+
+export interface ResearchProtocol {
+  url: string;
+  productRequirements: string;
+  judgePrompt: string;
+  /** Default revision notes prefix; variation name is appended automatically. */
+  revisionNotes?: string;
+  imagePaths?: string[];
+  variations: ResearchVariation[];
+}
+
+// ── Comparison summary ─────────────────────────────────────────────────────────
+
+export interface VariationSummary {
+  name: string;
+  result: ExperimentResult;
+}
+
+export function avgJudgeScore(
+  judgeScores: ExperimentResult["judgeScores"],
+  generatorId: string
+): number | null {
+  const scores: number[] = [];
+  for (const genMap of Object.values(judgeScores)) {
+    const r = genMap[generatorId];
+    if (r?.success && r.score !== undefined) {
+      scores.push(r.score);
+    }
+  }
+  if (scores.length === 0) return null;
+  return scores.reduce((a, b) => a + b, 0) / scores.length;
+}
+
+function printComparisonTable(summaries: VariationSummary[]): void {
+  const W = 62;
+  const heavy = "═".repeat(W);
+  const light = "─".repeat(W);
+
+  console.log(`\n${heavy}`);
+  console.log("  RESEARCH COMPARISON — Average judge scores per variation");
+  console.log(`  (scores 0–5, averaged across all judges)`);
+  console.log(heavy);
+
+  // Column headers: one per generator
+  const genCols = appConfig.generators.map((g) => g.name.substring(0, 9).padStart(10));
+  console.log(`${"Variation".padEnd(32)} ${genCols.join(" ")}`);
+  console.log(light);
+
+  for (const { name, result } of summaries) {
+    const cols = appConfig.generators.map((gen) => {
+      const avg = avgJudgeScore(result.judgeScores, gen.id);
+      if (avg === null) return "-".padStart(10);
+      return avg.toFixed(1).padStart(10);
+    });
+    const label = name.length > 31 ? name.substring(0, 28) + "…" : name;
+    console.log(`${label.padEnd(32)} ${cols.join(" ")}`);
+  }
+
+  console.log("");
+
+  // Best-per-generator callout
+  if (summaries.length > 1) {
+    console.log("  Best variation per generator:");
+    for (const gen of appConfig.generators) {
+      let best: { name: string; avg: number } | null = null;
+      for (const { name, result } of summaries) {
+        const avg = avgJudgeScore(result.judgeScores, gen.id);
+        if (avg !== null && (best === null || avg > best.avg)) {
+          best = { name, avg };
+        }
+      }
+      if (best) {
+        console.log(`    ${gen.name}: ${best.name} (avg ${best.avg.toFixed(1)})`);
+      }
+    }
+    console.log("");
+  }
+}
+
+// ── Core orchestration ─────────────────────────────────────────────────────────
+
+export async function runResearch(protocol: ResearchProtocol): Promise<VariationSummary[]> {
+  console.log(`\nResearch protocol loaded.`);
+  console.log(`URL:        ${protocol.url}`);
+  console.log(`Variations: ${protocol.variations.map((v) => v.name).join(", ")}`);
+  console.log(`Total runs: ${protocol.variations.length}\n`);
+
+  const summaries: VariationSummary[] = [];
+
+  for (let i = 0; i < protocol.variations.length; i++) {
+    const variation = protocol.variations[i];
+    const isLast = i === protocol.variations.length - 1;
+
+    console.log(`${"─".repeat(62)}`);
+    console.log(`Variation ${i + 1}/${protocol.variations.length}: ${variation.name}`);
+    console.log("─".repeat(62));
+
+    const expConfig: ExperimentConfig = {
+      url: protocol.url,
+      productRequirements: protocol.productRequirements,
+      judgePrompt: protocol.judgePrompt,
+      testMethodology: variation.testMethodology,
+      revisionNotes:
+        variation.revisionNotes ??
+        `${protocol.revisionNotes ? protocol.revisionNotes + " — " : ""}${variation.name}`,
+      imagePaths: protocol.imagePaths,
+    };
+
+    try {
+      const result = await runExperiment(expConfig);
+      printSummary(result);
+      summaries.push({ name: variation.name, result });
+    } catch (err) {
+      console.error(
+        `Variation "${variation.name}" failed: ${err instanceof Error ? err.message : err}`
+      );
+    }
+
+    if (!isLast) {
+      process.stdout.write("\nWaiting 5 seconds before next variation… ");
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      console.log("continuing.\n");
+    }
+  }
+
+  if (summaries.length > 0) {
+    printComparisonTable(summaries);
+  }
+
+  return summaries;
+}
+
+// ── CLI entry point ────────────────────────────────────────────────────────────
+
+async function main() {
+  const protocolPath = process.argv[2];
+  if (!protocolPath) {
+    console.error("Usage: npm run research <path-to-research.json>");
+    process.exit(1);
+  }
+
+  initTracing();
+
+  let protocol: ResearchProtocol;
+  try {
+    const raw = await fs.readFile(path.resolve(protocolPath), "utf-8");
+    protocol = JSON.parse(raw) as ResearchProtocol;
+  } catch (err) {
+    console.error(`Failed to load research protocol: ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
+  }
+
+  if (!protocol.variations?.length) {
+    console.error("Research protocol must have at least one variation.");
+    process.exit(1);
+  }
+
+  await runResearch(protocol);
+
+  process.stdout.write("Flushing traces to Langfuse… ");
+  await flushTracing();
+  console.log("done.\n");
+}
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

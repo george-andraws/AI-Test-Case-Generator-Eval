@@ -15,7 +15,8 @@ const USER_PROMPT = "Reply with exactly one sentence: what is 3 + 2 and why?";
 const requests: LLMRequest[] = [
   {
     provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
+    model: "claude-haiku-4-5-20251001", // dev model
+    //model: "claude-sonnet-4-20250514", // production latest
     systemPrompt: SYSTEM_PROMPT,
     userPrompt: USER_PROMPT,
     maxTokens: 128,

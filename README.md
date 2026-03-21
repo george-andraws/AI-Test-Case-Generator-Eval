@@ -116,6 +116,77 @@ There is no database, no authentication, and no cloud dependency beyond the LLM 
 
 ---
 
+## CLI Scripts
+
+Two headless scripts let you run experiments and research protocols without opening a browser — useful for batch runs, CI, or scripted comparisons.
+
+### Single experiment
+
+```bash
+npm run experiment <path-to-experiment.json>
+```
+
+Runs all generators in parallel, saves the revision to `data/`, runs all judges in parallel, patches scores back to disk, and sends judge scores to Langfuse. Prints a formatted summary table when complete.
+
+```bash
+npm run experiment experiments/example.json
+```
+
+**Experiment config shape** (`experiments/example.json`):
+
+```json
+{
+  "url": "http://localhost:3000",
+  "testMethodology": "You are a senior QA engineer…",
+  "productRequirements": "A task management app…",
+  "judgePrompt": "Score based on coverage and clarity…",
+  "revisionNotes": "Baseline run",
+  "imagePaths": []
+}
+```
+
+`imagePaths` is optional. When provided, each file is read from disk, base64-encoded, and sent to every generator and judge as visual context — identical to uploading screenshots through the UI.
+
+### Research protocol (multiple variations)
+
+```bash
+npm run research <path-to-research.json>
+```
+
+Runs a list of methodology variations sequentially against the same product requirements, with a 5-second pause between each to avoid rate-limit bursts. Prints individual results after each run, then a final comparison table showing average judge scores per variation per generator.
+
+```bash
+npm run research research/example.json
+```
+
+**Research protocol shape** (`research/example.json`):
+
+```json
+{
+  "url": "http://localhost:3000",
+  "productRequirements": "A task management app…",
+  "judgePrompt": "Score based on coverage and clarity…",
+  "revisionNotes": "Research run",
+  "imagePaths": [],
+  "variations": [
+    {
+      "name": "Baseline — plain language",
+      "testMethodology": "You are a senior QA engineer. Generate test cases…"
+    },
+    {
+      "name": "Gherkin format",
+      "testMethodology": "You are a senior QA engineer. Generate Gherkin scenarios…"
+    }
+  ]
+}
+```
+
+Each variation inherits `url`, `productRequirements`, `judgePrompt`, and `imagePaths` from the root and overrides `testMethodology`. The `revisionNotes` for each run is `"<root revisionNotes> — <variation name>"` unless overridden per-variation.
+
+All results are saved to `data/` as regular revisions and are visible in the UI history under their product URL.
+
+---
+
 ## Running tests
 
 ```bash

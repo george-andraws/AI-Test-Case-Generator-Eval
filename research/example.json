@@ -1,0 +1,17 @@
+{
+  "url": "http://localhost:3000",
+  "productRequirements": "A task management app where users can create, edit, complete, and delete tasks. Tasks have a title (required, max 200 chars), an optional description, a due date, and a priority level (low / medium / high). Users can filter tasks by status (all / active / completed) and sort by due date or priority. Completing a task marks it done and moves it to the completed list. Deleted tasks are permanently removed.",
+  "judgePrompt": "You are an expert QA lead evaluating AI-generated test cases. Score based on: completeness of coverage, clarity of steps, inclusion of edge cases and error states, and whether each test case is independently executable. Penalise vague steps, missing expected results, or untestable assertions.",
+  "revisionNotes": "Research run",
+  "imagePaths": ["data/images/image-google-com/rev-7-screenshot-1.png"],
+  "variations": [
+    {
+      "name": "Baseline — plain language",
+      "testMethodology": "You are a senior QA engineer. Generate comprehensive test cases covering happy paths, edge cases, error states, and boundary conditions. Write each test case with a clear title, preconditions, numbered steps, and expected result. Focus on user-facing behaviour."
+    },
+    {
+      "name": "Gherkin format",
+      "testMethodology": "You are a senior QA engineer. Generate test cases in strict Gherkin format (Feature / Scenario / Given / When / Then / And). Each scenario must be independently runnable. Cover happy paths, edge cases, error states, and boundary conditions. Include a Background section for shared preconditions."
+    }
+  ]
+}

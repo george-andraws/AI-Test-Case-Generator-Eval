@@ -26,9 +26,11 @@ const config: AppConfig = {
   generators: [
     {
       id: "claude",
-      name: "Claude 4 Sonnet",
+      name: "Claude Haiku 4.5",   // for dev
+      // name: "Claude 4 Sonnet", // latest production
       provider: "anthropic",
-      model: "claude-sonnet-4-20250514",
+      model: "claude-haiku-4-5-20251001",  // for dev
+      // model:  "claude-sonnet-4-20250514", // latest production
       apiKeyEnvVar: "ANTHROPIC_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
@@ -56,9 +58,11 @@ const config: AppConfig = {
   judges: [
     {
       id: "claude-judge",
-      name: "Claude 4 Sonnet (Judge)",
+      name: "Claude Haiku 4.5 (Judge)",   // for dev
+      // name: "Claude 4 Sonnet (Judge)"", // latest production
       provider: "anthropic",
-      model: "claude-sonnet-4-20250514",
+      model: "claude-haiku-4-5-20251001",  // for dev
+      // model:  "claude-sonnet-4-20250514", // latest production
       apiKeyEnvVar: "ANTHROPIC_API_KEY",
       maxTokens: 8192,
       temperature: 0.2,
