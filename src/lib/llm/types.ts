@@ -13,6 +13,11 @@ export interface TraceContext {
   tags?: string[];
 }
 
+export interface LLMImage {
+  base64: string;
+  mimeType: string;
+}
+
 export interface LLMRequest {
   provider: Provider;
   model: string;
@@ -20,6 +25,8 @@ export interface LLMRequest {
   userPrompt: string;
   maxTokens: number;
   temperature: number;
+  /** Images to include in the user message alongside the text prompt. */
+  images?: LLMImage[];
   /** Optional tracing context — every field ends up in Langfuse. */
   traceContext?: TraceContext;
 }

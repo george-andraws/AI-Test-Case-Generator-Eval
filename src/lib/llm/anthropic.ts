@@ -8,12 +8,29 @@ export async function callAnthropic(req: LLMRequest): Promise<AdapterResponse> {
 
   const start = Date.now();
 
+  const userContent: Anthropic.MessageParam["content"] =
+    req.images && req.images.length > 0
+      ? [
+          ...req.images.map(
+            (img): Anthropic.ImageBlockParam => ({
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: img.mimeType as Anthropic.Base64ImageSource["media_type"],
+                data: img.base64,
+              },
+            })
+          ),
+          { type: "text", text: req.userPrompt },
+        ]
+      : req.userPrompt;
+
   const message = await client.messages.create({
     model: req.model,
     max_tokens: req.maxTokens,
     temperature: req.temperature,
     system: req.systemPrompt,
-    messages: [{ role: "user", content: req.userPrompt }],
+    messages: [{ role: "user", content: userContent }],
   });
 
   const latencyMs = Date.now() - start;

@@ -147,4 +147,12 @@ describe('callLLM router', () => {
       'Adapter failed'
     );
   });
+
+  test('images array is passed through to the adapter', async () => {
+    const images = [{ base64: 'abc123', mimeType: 'image/png' }];
+    await callLLM({ ...baseRequest, provider: 'anthropic', images });
+    expect(mockCallAnthropic).toHaveBeenCalledWith(
+      expect.objectContaining({ images })
+    );
+  });
 });

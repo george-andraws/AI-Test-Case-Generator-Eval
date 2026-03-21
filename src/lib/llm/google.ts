@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import type { Part } from "@google/genai";
 import type { LLMRequest, LLMResponse } from "./types";
 
 type AdapterResponse = Omit<LLMResponse, "traceId">;
@@ -8,6 +9,18 @@ export async function callGoogle(req: LLMRequest): Promise<AdapterResponse> {
 
   const start = Date.now();
 
+  const contents =
+    req.images && req.images.length > 0
+      ? [
+          ...req.images.map(
+            (img): Part => ({
+              inlineData: { mimeType: img.mimeType, data: img.base64 },
+            })
+          ),
+          { text: req.userPrompt } satisfies Part,
+        ]
+      : req.userPrompt;
+
   const response = await ai.models.generateContent({
     model: req.model,
     config: {
@@ -15,7 +28,7 @@ export async function callGoogle(req: LLMRequest): Promise<AdapterResponse> {
       temperature: req.temperature,
       systemInstruction: req.systemPrompt,
     },
-    contents: req.userPrompt,
+    contents,
   });
 
   const latencyMs = Date.now() - start;

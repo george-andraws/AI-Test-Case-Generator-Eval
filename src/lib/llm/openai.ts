@@ -8,13 +8,26 @@ export async function callOpenAI(req: LLMRequest): Promise<AdapterResponse> {
 
   const start = Date.now();
 
+  const userContent: OpenAI.Chat.ChatCompletionUserMessageParam["content"] =
+    req.images && req.images.length > 0
+      ? [
+          ...req.images.map(
+            (img): OpenAI.Chat.ChatCompletionContentPartImage => ({
+              type: "image_url",
+              image_url: { url: `data:${img.mimeType};base64,${img.base64}` },
+            })
+          ),
+          { type: "text", text: req.userPrompt },
+        ]
+      : req.userPrompt;
+
   const completion = await client.chat.completions.create({
     model: req.model,
     max_tokens: req.maxTokens,
     temperature: req.temperature,
     messages: [
       { role: "system", content: req.systemPrompt },
-      { role: "user", content: req.userPrompt },
+      { role: "user", content: userContent },
     ],
   });
 

@@ -243,6 +243,25 @@ describe('updateRevision', () => {
     ).rejects.toThrow('99');
   });
 
+  test('patches images array into revision', async () => {
+    const slug = mod.urlToSlug(baseRevision.url);
+    await mod.saveRevision({ ...baseRevision, images: [] });
+    const paths = ['data/images/slug/rev-1-screenshot-1.png', 'data/images/slug/rev-1-screenshot-2.jpg'];
+    await mod.updateRevision(slug, 1, { images: paths });
+    const updated = await mod.readRevision(slug, 1);
+    expect(updated!.images).toEqual(paths);
+  });
+
+  test('images patch replaces existing images (not merged)', async () => {
+    const slug = mod.urlToSlug(baseRevision.url);
+    await mod.saveRevision({ ...baseRevision, images: ['data/images/slug/old.png'] });
+    const newPaths = ['data/images/slug/rev-1-screenshot-1.png'];
+    await mod.updateRevision(slug, 1, { images: newPaths });
+    const updated = await mod.readRevision(slug, 1);
+    expect(updated!.images).toEqual(newPaths);
+    expect(updated!.images).not.toContain('data/images/slug/old.png');
+  });
+
   test('empty patch leaves revision unchanged', async () => {
     const slug = mod.urlToSlug(baseRevision.url);
     await mod.saveRevision(baseRevision);

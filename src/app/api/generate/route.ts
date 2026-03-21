@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import config from "@/lib/config";
 import { callLLM, flushSpans } from "@/lib/llm";
+import type { LLMImage } from "@/lib/llm";
 
 export const maxDuration = 120;
 
@@ -10,6 +11,8 @@ interface GenerateRequestBody {
   productRequirements: string;
   /** When provided, run only this single generator model. */
   modelId?: string;
+  /** Optional screenshots to include as visual context for each model. */
+  images?: LLMImage[];
 }
 
 interface ModelResult {
@@ -30,7 +33,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { url, testMethodology, productRequirements, modelId } = body;
+    const { url, testMethodology, productRequirements, modelId, images } = body;
     if (!url || !testMethodology || !productRequirements) {
       return NextResponse.json(
         { error: "Missing required fields: url, testMethodology, productRequirements" },
@@ -46,7 +49,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Unknown modelId: ${modelId}` }, { status: 400 });
     }
 
-    const userPrompt = `Application under test: ${url}
+    const hasImages = Array.isArray(images) && images.length > 0;
+
+    const userPrompt = hasImages
+      ? `Application under test: ${url}
+
+[Screenshots of the application UI are attached above for visual context]
+
+Product Requirements:
+${productRequirements}
+
+Based on the above requirements and the attached screenshots, generate comprehensive test cases for this application.`
+      : `Application under test: ${url}
 
 Product Requirements:
 ${productRequirements}
@@ -61,6 +75,7 @@ Based on the above requirements, generate comprehensive test cases for this appl
         userPrompt,
         maxTokens: model.maxTokens,
         temperature: model.temperature,
+        images: hasImages ? images : undefined,
         traceContext: {
           traceName: `generate: ${model.id}`,
           role: "generator",

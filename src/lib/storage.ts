@@ -127,6 +127,7 @@ export async function saveRevision(
 
 export interface RevisionPatch {
   generations?: RevisionData["generations"];
+  images?: RevisionData["images"];
   scores?: {
     human?: RevisionData["scores"]["human"];
     judges?: RevisionData["scores"]["judges"];
@@ -158,6 +159,7 @@ export async function updateRevision(
     ...(patch.generations !== undefined && {
       generations: { ...existing.generations, ...patch.generations },
     }),
+    ...(patch.images !== undefined && { images: patch.images }),
     ...(patch.scores !== undefined && {
       scores: {
         human: { ...existing.scores.human, ...(patch.scores.human ?? {}) },

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import config from "@/lib/config";
 import { callLLM, flushSpans, scoreTrace } from "@/lib/llm";
+import type { LLMImage } from "@/lib/llm";
 
 export const maxDuration = 120;
 
@@ -16,6 +17,8 @@ interface JudgeRequestBody {
   generations: Record<string, GenerationEntry>;
   /** When provided, run only this single judge model. */
   judgeId?: string;
+  /** Optional screenshots to provide visual context when judging. */
+  images?: LLMImage[];
 }
 
 interface JudgeScore {
@@ -69,7 +72,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { url, productRequirements, judgePrompt, generations, judgeId } = body;
+  const { url, productRequirements, judgePrompt, generations, judgeId, images } = body;
+  const hasImages = Array.isArray(images) && images.length > 0;
   if (!url || !productRequirements || !judgePrompt || !generations) {
     return NextResponse.json(
       { error: "Missing required fields: url, productRequirements, judgePrompt, generations" },
@@ -99,9 +103,13 @@ export async function POST(req: NextRequest) {
         generatorConfig.provider === judge.provider &&
         generatorConfig.model === judge.model;
 
+      const imageNote = hasImages
+        ? "\n\n[Screenshots of the application are attached above for visual context]"
+        : "";
+
       const userPrompt = `You are evaluating the quality of AI-generated test cases.
 
-Application under test: ${url}
+Application under test: ${url}${imageNote}
 
 Product Requirements:
 ${productRequirements}
@@ -130,6 +138,7 @@ Respond in this exact JSON format and nothing else:
         userPrompt,
         maxTokens: judge.maxTokens,
         temperature: judge.temperature,
+        images: hasImages ? images : undefined,
         traceContext: {
           traceName: `judge: ${judge.id} → ${generatorId}`,
           role: "judge",

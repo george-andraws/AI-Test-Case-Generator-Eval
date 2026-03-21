@@ -199,6 +199,32 @@ describe('POST /api/judge', () => {
     );
   });
 
+  test('images in body → callLLM receives images array', async () => {
+    const images = [{ base64: 'abc123', mimeType: 'image/png' }];
+    const req = makeRequest({ ...validBody, judgeId: 'claude-judge', images });
+    await POST(req as any);
+    expect(mockCallLLM).toHaveBeenCalledWith(expect.objectContaining({ images }));
+  });
+
+  test('images in body → judge prompt includes visual context note', async () => {
+    const req = makeRequest({
+      ...validBody,
+      judgeId: 'claude-judge',
+      images: [{ base64: 'abc', mimeType: 'image/png' }],
+    });
+    await POST(req as any);
+    const { userPrompt } = mockCallLLM.mock.calls[0][0];
+    expect(userPrompt).toContain('Screenshots of the application are attached');
+  });
+
+  test('no images → callLLM receives no images, prompt has no visual context note', async () => {
+    const req = makeRequest({ ...validBody, judgeId: 'gpt-judge' });
+    await POST(req as any);
+    const call = mockCallLLM.mock.calls[0][0];
+    expect(call.images).toBeUndefined();
+    expect(call.userPrompt).not.toContain('Screenshots');
+  });
+
   test('scoreTrace not called when LLM parse fails (score undefined)', async () => {
     mockCallLLM.mockResolvedValue({
       text: 'pure prose no json',

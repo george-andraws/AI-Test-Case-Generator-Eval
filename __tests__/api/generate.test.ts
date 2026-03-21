@@ -184,4 +184,44 @@ describe('POST /api/generate', () => {
       })
     );
   });
+
+  test('images in body → callLLM receives images array', async () => {
+    const images = [{ base64: 'abc123', mimeType: 'image/png' }];
+    const req = makeRequest({
+      url: 'http://test.com',
+      testMethodology: 'Test methodology',
+      productRequirements: 'Product requirements',
+      modelId: 'claude',
+      images,
+    });
+    await POST(req as any);
+    expect(mockCallLLM).toHaveBeenCalledWith(expect.objectContaining({ images }));
+  });
+
+  test('images in body → user prompt includes screenshot context note', async () => {
+    const req = makeRequest({
+      url: 'http://test.com',
+      testMethodology: 'Test methodology',
+      productRequirements: 'Product requirements',
+      modelId: 'claude',
+      images: [{ base64: 'abc', mimeType: 'image/png' }],
+    });
+    await POST(req as any);
+    const { userPrompt } = mockCallLLM.mock.calls[0][0];
+    expect(userPrompt).toContain('Screenshots of the application UI are attached');
+    expect(userPrompt).toContain('attached screenshots');
+  });
+
+  test('no images → callLLM receives no images, prompt has no screenshot note', async () => {
+    const req = makeRequest({
+      url: 'http://test.com',
+      testMethodology: 'Test methodology',
+      productRequirements: 'Product requirements',
+      modelId: 'claude',
+    });
+    await POST(req as any);
+    const call = mockCallLLM.mock.calls[0][0];
+    expect(call.images).toBeUndefined();
+    expect(call.userPrompt).not.toContain('Screenshots');
+  });
 });

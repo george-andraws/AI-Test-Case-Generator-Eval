@@ -195,3 +195,71 @@ The codebase had no automated tests. A full suite was added under `__tests__/` c
 - **Judge scores sent to Langfuse immediately**: `scoreTrace` is now called inside `/api/judge` after results are assembled, rather than waiting for the human submit. This means judge scores appear in Langfuse as soon as judging finishes, independent of whether the user ever submits human scores.
 - **`capturedForm` snapshot**: `handleGenerate` captures the form values at invocation time (`const capturedForm = form`) so that even if the user edits the form while generation/judging is running, the saved revision reflects what was submitted.
 - **UI hint update**: The "Next generation will create: Revision N" hint changes to "Current session: Revision N" once a revision is saved, giving the user confirmation that data is already persisted.
+
+---
+
+### Session 4 — 2026-03-21
+
+**Focus:** Adding screenshot/image upload support so models can generate and judge test cases from visual context in addition to written requirements.
+
+---
+
+#### Feature Overview
+
+The tool now accepts up to 10 screenshots per submission. Images flow through the entire pipeline: they are shown as thumbnails in the UI, sent as base64 to every generator and judge model, saved to disk as separate files, and stored as relative paths in the revision JSON.
+
+---
+
+#### LLM Abstraction Layer
+
+`LLMImage` (`{ base64: string; mimeType: string }`) was added to the request type in `src/lib/llm/types.ts` and exported from the llm index. Each of the three provider adapters was updated to conditionally build a multi-part user message when images are present:
+
+- **Anthropic**: user `content` becomes `[...ImageBlockParam[], TextBlockParam]`. The `media_type` field requires a specific literal union (`'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'`), so the MIME type is cast accordingly.
+- **OpenAI**: user `content` becomes `[...ChatCompletionContentPartImage[], text]` using `image_url: { url: "data:<mime>;base64,<data>" }` format.
+- **Google**: `contents` switches from a plain string to a `Part[]` array with `{ inlineData: { mimeType, data } }` items followed by the text part. The Google SDK's `ContentListUnion` type accepts `PartUnion[]` directly, making this the cleanest of the three.
+
+When no images are provided, each adapter falls back to its original single-string form — no behavior change for text-only calls.
+
+---
+
+#### Image Storage (`/api/upload`)
+
+A single route handles both serving and saving:
+
+- **`POST /api/upload`** accepts `multipart/form-data` with `url`, `revision`, and `images` (File array). Files are saved to `data/images/{url-slug}/rev-{N}-screenshot-{i}.{ext}` and the relative paths are returned. Only PNG, JPG, and WebP are accepted; anything else returns 400. Path creation uses `fs.mkdir({ recursive: true })`.
+
+- **`GET /api/upload?path=...`** serves a stored image file. The path is validated to start with `data/images/` after normalization to block path traversal — any other path returns 403.
+
+The `images` field was already present in the `RevisionData` schema as an empty array. `RevisionPatch` was extended with `images?: string[]` and `updateRevision` was updated to replace (not merge) the array when an images patch is provided.
+
+---
+
+#### API Route Changes
+
+Both `/api/generate` and `/api/judge` accept an optional `images: LLMImage[]` field. When images are present, the user prompt is updated to include a context line ("Screenshots of the application UI are attached above for visual context"), so the model knows to incorporate the visual information. The images are passed directly to `callLLM`. Judge scores are still attached to Langfuse traces as before — no change to that flow.
+
+---
+
+#### UI (`ImageUpload` component + page wiring)
+
+`src/app/components/ImageUpload.tsx` is a self-contained client component with:
+- Drag-and-drop zone and click-to-select (hidden `<input type="file">`)
+- Client-side validation: 10 image max, 5 MB per file, PNG/JPG/WebP only — all checked before touching state
+- New uploads shown as `data:<mime>;base64,<data>` thumbnails with an × remove button
+- Historic images (from a loaded past revision) shown as read-only thumbnails fetched via `/api/upload?path=...`
+- `disabled` prop hides the drop zone while generation is running
+
+In `page.tsx`, images are captured at the start of `handleGenerate` (`capturedImages = images`) alongside `capturedForm`. After Save Point 1 (the POST that creates the revision), `uploadAndPatchImages` fires in the background: it converts base64 back to `Blob` objects, POSTs them to `/api/upload`, and PATCHes the returned paths into the revision. This is fire-and-forget — a failure here doesn't block judging or the UI. When loading a past revision, `loadRevisionIntoForm` sets `historicImagePaths` from `rev.images` and clears the new-image state.
+
+---
+
+#### Test Coverage
+
+28 new tests were added across 6 files:
+
+- `__tests__/api/upload.test.ts` (20 tests) — GET path security (traversal, wrong prefix, 404), Content-Type by extension; POST valid/invalid/edge cases, `mkdir`/`writeFile` call verification, formData failure handling
+- `__tests__/api/generate.test.ts` — images forwarded to `callLLM`; prompt contains screenshot note when images present; clean fallback when no images
+- `__tests__/api/judge.test.ts` — same as generate, plus visual context note in judge prompt
+- `__tests__/api/data.test.ts` — PATCH with `images` array calls `updateRevision` with correct args
+- `__tests__/lib/llm/router.test.ts` — images pass through `callLLM` to the adapter
+- `__tests__/lib/storage.test.ts` — `updateRevision` sets images array; replacing existing paths (not merging)

@@ -6,6 +6,7 @@ import type { RevisionData } from "@/lib/storage";
 import { ModelOutputPanel, type GeneratorPanel } from "./components/ModelOutputPanel";
 import { type JudgePanelEntry } from "./components/JudgeScoreSection";
 import { ScoringTrends } from "./components/ScoringTrends";
+import { ImageUpload, type ImageFile } from "./components/ImageUpload";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,10 @@ export default function Page() {
   const [panels, setPanels] = useState<GeneratorPanel[]>([]);
   const [judgeResults, setJudgeResults] = useState<JudgeResultsMap>({});
 
+  // ── Image uploads ─────────────────────────────────────────────────────────
+  const [images, setImages] = useState<ImageFile[]>([]);
+  const [historicImagePaths, setHistoricImagePaths] = useState<string[]>([]);
+
   // ── Incremental persistence ───────────────────────────────────────────────
   const [currentRevisionId, setCurrentRevisionId] = useState<number | null>(null);
 
@@ -146,6 +151,8 @@ export default function Page() {
       revisionNotes: rev.revisionNotes,
       judgePrompt: rev.prompts.judgePrompt,
     });
+    setHistoricImagePaths(rev.images);
+    setImages([]);
   }
 
   async function handleProductSelect(url: string) {
@@ -155,6 +162,8 @@ export default function Page() {
     setJudgeResults({});
     setSubmitStatus("idle");
     setCurrentRevisionId(null);
+    setImages([]);
+    setHistoricImagePaths([]);
     if (!url) { setForm(EMPTY_FORM); setRevisions([]); setSelectedRevision("new"); return; }
     await fetchRevisions(url);
   }
@@ -163,6 +172,8 @@ export default function Page() {
     if (value === "new") {
       setSelectedRevision("new");
       setForm((prev) => ({ ...EMPTY_FORM, url: prev.url }));
+      setImages([]);
+      setHistoricImagePaths([]);
       return;
     }
     const revNum = parseInt(value, 10);
@@ -178,6 +189,39 @@ export default function Page() {
     setPanels((prev) =>
       prev.map((p) => (p.id === panelId ? { ...p, humanScore: score } : p))
     );
+  }
+
+  // ── Image upload helper ───────────────────────────────────────────────────
+
+  async function uploadAndPatchImages(
+    url: string,
+    revisionId: number,
+    imgs: ImageFile[]
+  ): Promise<void> {
+    const formData = new FormData();
+    formData.append("url", url);
+    formData.append("revision", String(revisionId));
+
+    for (const img of imgs) {
+      const byteString = atob(img.base64);
+      const byteArray = new Uint8Array(byteString.length);
+      for (let i = 0; i < byteString.length; i++) {
+        byteArray[i] = byteString.charCodeAt(i);
+      }
+      const blob = new Blob([byteArray], { type: img.mimeType });
+      formData.append("images", blob, img.name);
+    }
+
+    const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+    if (!uploadRes.ok) return;
+    const { paths } = await uploadRes.json();
+    if (!Array.isArray(paths) || paths.length === 0) return;
+
+    await fetch("/api/data", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, revision: revisionId, images: paths }),
+    });
   }
 
   // ── Generate + judge flow ─────────────────────────────────────────────────
@@ -197,8 +241,9 @@ export default function Page() {
       }))
     );
 
-    // Capture form values now so they stay consistent through the async flow
+    // Capture form and image values now so they stay consistent through the async flow
     const capturedForm = form;
+    const capturedImages = images;
 
     // Fire one request per generator model in parallel
     type GenSuccess = {
@@ -221,6 +266,9 @@ export default function Page() {
             testMethodology: capturedForm.testMethodology,
             productRequirements: capturedForm.productRequirements,
             modelId: model.id,
+            images: capturedImages.length > 0
+              ? capturedImages.map(({ base64, mimeType }) => ({ base64, mimeType }))
+              : undefined,
           }),
         });
         const data = await res.json();
@@ -308,6 +356,11 @@ export default function Page() {
         // Refresh so the product selector shows this URL
         setSelectedUrl(capturedForm.url);
         await Promise.allSettled([fetchRevisions(capturedForm.url), fetchProducts()]);
+
+        // Upload images in background; PATCH paths into revision when done
+        if (capturedImages.length > 0 && savedRevisionId !== null) {
+          uploadAndPatchImages(capturedForm.url, savedRevisionId, capturedImages).catch(() => {});
+        }
       }
     } catch { /* non-critical — judging proceeds regardless */ }
 
@@ -347,6 +400,9 @@ export default function Page() {
               productRequirements: capturedForm.productRequirements,
               judgePrompt: capturedForm.judgePrompt,
               generations: { [model.id]: { modelName: model.name, output: result.output } },
+              images: capturedImages.length > 0
+                ? capturedImages.map(({ base64, mimeType }) => ({ base64, mimeType }))
+                : undefined,
             }),
           });
           const data = await res.json();
@@ -620,6 +676,18 @@ export default function Page() {
                 className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-50 disabled:text-gray-400"
               />
               <p className="mt-1 text-xs text-gray-400">Metadata only — models do not browse this URL.</p>
+            </div>
+            <div>
+              <Label htmlFor="images">Screenshots of application (optional)</Label>
+              <ImageUpload
+                images={images}
+                onChange={setImages}
+                historicPaths={historicImagePaths.length > 0 ? historicImagePaths : undefined}
+                disabled={isRunning}
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Included as visual context in every generator and judge call.
+              </p>
             </div>
             <div>
               <Label htmlFor="productRequirements">Product requirements</Label>

@@ -216,6 +216,18 @@ describe('PATCH /api/data', () => {
     expect(res.status).toBe(400);
   });
 
+  test('valid patch with images → calls updateRevision with images array', async () => {
+    mockUpdateRevision.mockResolvedValue(undefined);
+    const imagePaths = ['data/images/slug/rev-1-screenshot-1.png'];
+    const req = makePatchRequest({ url: 'http://test.com', revision: 1, images: imagePaths });
+    await PATCH(req as any);
+    expect(mockUpdateRevision).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      expect.objectContaining({ images: imagePaths })
+    );
+  });
+
   test('updateRevision throws (revision not found) → 500', async () => {
     mockUpdateRevision.mockRejectedValue(new Error('Revision 99 not found for slug: test'));
     const req = makePatchRequest({ url: 'http://test.com', revision: 99 });
