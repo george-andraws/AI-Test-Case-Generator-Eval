@@ -93,6 +93,8 @@ export default function Page() {
   // ── Score submission ──────────────────────────────────────────────────────
   const [submitStatus, setSubmitStatus] = useState<SubmitStatus>("idle");
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Human scores as last persisted to disk — used to detect changes for "Update" mode
+  const [savedHumanScores, setSavedHumanScores] = useState<Record<string, number | null>>({});
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const nextRevisionNumber = selectedUrl && revisions.length > 0 ? revisions.length + 1 : 1;
@@ -107,6 +109,12 @@ export default function Page() {
     (form.testMethodology.trim().length > 0 || form.productRequirements.trim().length > 0) &&
     phase !== "generating" &&
     phase !== "judging";
+
+  const scoresWereSubmitted = Object.values(savedHumanScores).some((v) => v !== null);
+  const anyScoreChanged = successfulPanels.some(
+    (p) => p.humanScore !== undefined && p.humanScore !== savedHumanScores[p.id]
+  );
+  const canSubmit = scoresWereSubmitted ? anyScoreChanged : allScored;
 
   // ── Data fetching ─────────────────────────────────────────────────────────
   const fetchProducts = useCallback(async () => {
@@ -153,6 +161,69 @@ export default function Page() {
     });
     setHistoricImagePaths(rev.images);
     setImages([]);
+    setSubmitStatus("idle");
+    setSubmitError(null);
+
+    const hasGenerations = Object.keys(rev.generations).length > 0;
+    if (!hasGenerations) {
+      setPanels([]);
+      setJudgeResults({});
+      setCurrentRevisionId(null);
+      setSavedHumanScores({});
+      setPhase("idle");
+      return;
+    }
+
+    // Hydrate panels from stored generations
+    const loadedPanels: GeneratorPanel[] = Object.entries(rev.generations).map(([modelId, gen]) => {
+      const fromSnapshot = rev.configSnapshot.generators.find((g) => g.id === modelId);
+      const fromConfig = config.generators.find((g) => g.id === modelId);
+      return {
+        id: modelId,
+        name: fromSnapshot?.name ?? fromConfig?.name ?? modelId,
+        model: fromSnapshot?.model ?? fromConfig?.model ?? modelId,
+        status: "success",
+        output: gen.output,
+        tokenUsage: gen.tokenUsage,
+        latencyMs: gen.latencyMs,
+        langfuseTraceId: gen.langfuseTraceId,
+        humanScore: rev.scores.human[modelId] ?? undefined,
+      };
+    });
+    setPanels(loadedPanels);
+
+    // Hydrate judge results from stored scores
+    const loadedJudgeResults: JudgeResultsMap = {};
+    for (const [judgeId, genMap] of Object.entries(rev.scores.judges)) {
+      loadedJudgeResults[judgeId] = {};
+      const judgeSnap = rev.configSnapshot.judges.find((j) => j.id === judgeId);
+      for (const [genId, judgeScore] of Object.entries(genMap)) {
+        const genSnap = rev.configSnapshot.generators.find((g) => g.id === genId);
+        const selfEvaluation = !!(
+          judgeSnap && genSnap &&
+          judgeSnap.provider === genSnap.provider &&
+          judgeSnap.model === genSnap.model
+        );
+        loadedJudgeResults[judgeId][genId] = {
+          status: "success",
+          score: judgeScore.score,
+          feedback: judgeScore.feedback,
+          langfuseTraceId: judgeScore.langfuseTraceId,
+          selfEvaluation,
+        };
+      }
+    }
+    setJudgeResults(loadedJudgeResults);
+
+    // Track persisted human scores for "Update" mode detection
+    const humanScores: Record<string, number | null> = {};
+    for (const [modelId, score] of Object.entries(rev.scores.human)) {
+      humanScores[modelId] = score;
+    }
+    setSavedHumanScores(humanScores);
+
+    setCurrentRevisionId(rev.revision);
+    setPhase("done");
   }
 
   async function handleProductSelect(url: string) {
@@ -161,6 +232,8 @@ export default function Page() {
     setPanels([]);
     setJudgeResults({});
     setSubmitStatus("idle");
+    setSubmitError(null);
+    setSavedHumanScores({});
     setCurrentRevisionId(null);
     setImages([]);
     setHistoricImagePaths([]);
@@ -174,6 +247,13 @@ export default function Page() {
       setForm((prev) => ({ ...EMPTY_FORM, url: prev.url }));
       setImages([]);
       setHistoricImagePaths([]);
+      setPanels([]);
+      setJudgeResults({});
+      setSavedHumanScores({});
+      setCurrentRevisionId(null);
+      setPhase("idle");
+      setSubmitStatus("idle");
+      setSubmitError(null);
       return;
     }
     const revNum = parseInt(value, 10);
@@ -189,6 +269,8 @@ export default function Page() {
     setPanels((prev) =>
       prev.map((p) => (p.id === panelId ? { ...p, humanScore: score } : p))
     );
+    // Allow re-submitting after a previous submit if the user changes a score
+    if (submitStatus === "done") setSubmitStatus("idle");
   }
 
   // ── Image upload helper ───────────────────────────────────────────────────
@@ -230,6 +312,7 @@ export default function Page() {
     setPhase("generating");
     setSubmitStatus("idle");
     setSubmitError(null);
+    setSavedHumanScores({});
     setJudgeResults({});
     setCurrentRevisionId(null);
 
@@ -577,6 +660,8 @@ export default function Page() {
     } catch { /* disk save failed — still show result */ }
 
     if (langfuseOk) {
+      // Update the saved baseline so "anyScoreChanged" resets correctly
+      setSavedHumanScores(humanScores);
       setSubmitStatus("done");
     } else {
       setSubmitStatus("error");
@@ -775,7 +860,7 @@ export default function Page() {
               <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center">
                 <button
                   onClick={handleSubmitScores}
-                  disabled={!allScored || submitStatus === "submitting" || submitStatus === "done"}
+                  disabled={!canSubmit || submitStatus === "submitting" || submitStatus === "done"}
                   className="inline-flex items-center gap-2 rounded-md bg-green-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {submitStatus === "submitting" && (
@@ -785,10 +870,18 @@ export default function Page() {
                     ? "Scores submitted ✓"
                     : submitStatus === "submitting"
                     ? "Submitting…"
-                    : "Submit human scores"}
+                    : scoresWereSubmitted
+                    ? "Update scores in Langfuse"
+                    : "Submit scores to Langfuse"}
                 </button>
 
-                {!allScored && submitStatus === "idle" && (
+                {scoresWereSubmitted && submitStatus === "idle" && (
+                  <p className="text-xs text-gray-500">
+                    ✓ Previously submitted
+                    {!anyScoreChanged && " — change a score to update"}
+                  </p>
+                )}
+                {!scoresWereSubmitted && !allScored && submitStatus === "idle" && (
                   <p className="text-xs text-gray-400">
                     Score all {successfulPanels.length} model output{successfulPanels.length !== 1 ? "s" : ""} to enable.
                   </p>
