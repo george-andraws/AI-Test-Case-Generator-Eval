@@ -18,6 +18,14 @@ interface Props {
   results: Record<string, JudgePanelEntry>;
 }
 
+function scoreColor(score: number | undefined): string {
+  if (score === undefined) return "text-gray-500";
+  if (score <= 1) return "text-red-600";
+  if (score <= 3) return "text-orange-500";
+  if (score === 4) return "text-blue-600";
+  return "text-green-800";
+}
+
 export function JudgeScoreSection({ judgeModels, results }: Props) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
@@ -43,7 +51,7 @@ export function JudgeScoreSection({ judgeModels, results }: Props) {
                   <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-400 border-t-transparent shrink-0" />
                 )}
                 {entry?.status === "success" && (
-                  <span className="font-medium text-gray-500 shrink-0">
+                  <span className={`font-medium shrink-0 ${scoreColor(entry.score)}`}>
                     {entry.score ?? "—"}/5
                   </span>
                 )}
@@ -57,7 +65,7 @@ export function JudgeScoreSection({ judgeModels, results }: Props) {
                 <span className="text-gray-500 truncate">
                   {judge.name}
                   {entry?.selfEvaluation && (
-                    <span className="ml-1 text-gray-400">(self)</span>
+                    <span className="ml-1 text-red-500">(self)</span>
                   )}
                 </span>
               </div>
