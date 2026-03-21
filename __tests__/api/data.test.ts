@@ -1,16 +1,18 @@
-import { GET, POST } from '../../src/app/api/data/route';
-import { readRevisions, readRevision, saveRevision } from '../../src/lib/storage';
+import { GET, POST, PATCH } from '../../src/app/api/data/route';
+import { readRevisions, readRevision, saveRevision, updateRevision } from '../../src/lib/storage';
 
 jest.mock('../../src/lib/storage', () => ({
   urlToSlug: jest.fn((url: string) => url.replace(/[^a-z0-9]+/gi, '-').toLowerCase()),
   readRevisions: jest.fn(),
   readRevision: jest.fn(),
   saveRevision: jest.fn(),
+  updateRevision: jest.fn(),
 }));
 
 const mockReadRevisions = readRevisions as jest.Mock;
 const mockReadRevision = readRevision as jest.Mock;
 const mockSaveRevision = saveRevision as jest.Mock;
+const mockUpdateRevision = updateRevision as jest.Mock;
 
 const sampleRevision = {
   revision: 1,
@@ -43,6 +45,14 @@ function makeGetRequest(params: Record<string, string>) {
 function makePostRequest(body: unknown) {
   return new Request('http://localhost/api/data', {
     method: 'POST',
+    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+function makePatchRequest(body: unknown) {
+  return new Request('http://localhost/api/data', {
+    method: 'PATCH',
     body: JSON.stringify(body),
     headers: { 'Content-Type': 'application/json' },
   });
@@ -147,5 +157,71 @@ describe('POST /api/data', () => {
     const res = await POST(req as any);
     const data = await res.json();
     expect(data.revision).toBe(1);
+  });
+});
+
+describe('PATCH /api/data', () => {
+  test('valid patch with human scores → 200, {success: true}', async () => {
+    mockUpdateRevision.mockResolvedValue(undefined);
+    const req = makePatchRequest({
+      url: 'http://test.com',
+      revision: 1,
+      scores: { human: { claude: 4 } },
+    });
+    const res = await PATCH(req as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+  });
+
+  test('valid patch with judge scores → calls updateRevision with scores.judges', async () => {
+    mockUpdateRevision.mockResolvedValue(undefined);
+    const judgeScores = {
+      'claude-judge': { claude: { score: 4, feedback: 'Good', langfuseTraceId: 'trace-1' } },
+    };
+    const req = makePatchRequest({
+      url: 'http://test.com',
+      revision: 2,
+      scores: { judges: judgeScores },
+    });
+    await PATCH(req as any);
+    expect(mockUpdateRevision).toHaveBeenCalledWith(
+      expect.any(String),
+      2,
+      expect.objectContaining({ scores: expect.objectContaining({ judges: judgeScores }) })
+    );
+  });
+
+  test('valid patch with generations → calls updateRevision with generations', async () => {
+    mockUpdateRevision.mockResolvedValue(undefined);
+    const gens = { claude: { output: 'out', tokenUsage: { input: 5, output: 10 }, latencyMs: 50, langfuseTraceId: 'trace-2' } };
+    const req = makePatchRequest({ url: 'http://test.com', revision: 1, generations: gens });
+    await PATCH(req as any);
+    expect(mockUpdateRevision).toHaveBeenCalledWith(
+      expect.any(String),
+      1,
+      expect.objectContaining({ generations: gens })
+    );
+  });
+
+  test('missing url → 400', async () => {
+    const req = makePatchRequest({ revision: 1, scores: { human: { claude: 4 } } });
+    const res = await PATCH(req as any);
+    expect(res.status).toBe(400);
+  });
+
+  test('missing revision → 400', async () => {
+    const req = makePatchRequest({ url: 'http://test.com', scores: { human: { claude: 4 } } });
+    const res = await PATCH(req as any);
+    expect(res.status).toBe(400);
+  });
+
+  test('updateRevision throws (revision not found) → 500', async () => {
+    mockUpdateRevision.mockRejectedValue(new Error('Revision 99 not found for slug: test'));
+    const req = makePatchRequest({ url: 'http://test.com', revision: 99 });
+    const res = await PATCH(req as any);
+    expect(res.status).toBe(500);
+    const data = await res.json();
+    expect(data.success).toBe(false);
   });
 });

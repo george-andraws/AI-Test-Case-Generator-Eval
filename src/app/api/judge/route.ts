@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import config from "@/lib/config";
-import { callLLM, flushSpans } from "@/lib/llm";
+import { callLLM, flushSpans, scoreTrace } from "@/lib/llm";
 
 export const maxDuration = 120;
 
@@ -182,6 +182,25 @@ Respond in this exact JSON format and nothing else:
       };
     }
   });
+
+  // Attach judge scores to Langfuse traces
+  const scoreCalls: Array<Promise<unknown>> = [];
+  for (const [judgeId, genMap] of Object.entries(results)) {
+    for (const [genId, result] of Object.entries(genMap)) {
+      if (result.success && result.score !== undefined && result.langfuseTraceId) {
+        scoreCalls.push(
+          scoreTrace({
+            traceId: result.langfuseTraceId,
+            name: `judge-score:${judgeId}→${genId}`,
+            value: result.score,
+            comment: result.feedback,
+            source: "llm_judge",
+          })
+        );
+      }
+    }
+  }
+  await Promise.allSettled(scoreCalls);
 
   await flushSpans();
   return NextResponse.json({ results });

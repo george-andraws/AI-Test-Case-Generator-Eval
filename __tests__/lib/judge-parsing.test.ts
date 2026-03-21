@@ -4,6 +4,7 @@ import { callLLM } from '../../src/lib/llm';
 jest.mock('../../src/lib/llm', () => ({
   callLLM: jest.fn(),
   flushSpans: jest.fn().mockResolvedValue(undefined),
+  scoreTrace: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../../src/lib/config', () => ({

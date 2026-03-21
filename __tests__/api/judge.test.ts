@@ -1,9 +1,10 @@
 import { POST } from '../../src/app/api/judge/route';
-import { callLLM } from '../../src/lib/llm';
+import { callLLM, scoreTrace } from '../../src/lib/llm';
 
 jest.mock('../../src/lib/llm', () => ({
   callLLM: jest.fn(),
   flushSpans: jest.fn().mockResolvedValue(undefined),
+  scoreTrace: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../../src/lib/config', () => ({
@@ -58,6 +59,7 @@ jest.mock('../../src/lib/config', () => ({
 }));
 
 const mockCallLLM = callLLM as jest.Mock;
+const mockScoreTrace = scoreTrace as jest.Mock;
 
 const defaultLLMResponse = {
   text: '{"score": 4, "feedback": "Good coverage"}',
@@ -180,6 +182,33 @@ describe('POST /api/judge', () => {
     const successes = allResults.filter((r) => r.success);
     expect(failures.length).toBeGreaterThan(0);
     expect(successes.length).toBeGreaterThan(0);
+  });
+
+  test('scoreTrace called for each successful result', async () => {
+    mockCallLLM.mockResolvedValue(defaultLLMResponse);
+    const req = makeRequest({ ...validBody, judgeId: 'claude-judge' });
+    await POST(req as any);
+    // claude-judge × claude generator = 1 successful result
+    expect(mockScoreTrace).toHaveBeenCalledTimes(1);
+    expect(mockScoreTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        traceId: 'trace-abc123',
+        value: 4,
+        source: 'llm_judge',
+      })
+    );
+  });
+
+  test('scoreTrace not called when LLM parse fails (score undefined)', async () => {
+    mockCallLLM.mockResolvedValue({
+      text: 'pure prose no json',
+      tokenUsage: { input: 10, output: 5 },
+      latencyMs: 80,
+      traceId: 'trace-nojson',
+    });
+    const req = makeRequest({ ...validBody, judgeId: 'gpt-judge' });
+    await POST(req as any);
+    expect(mockScoreTrace).not.toHaveBeenCalled();
   });
 
   test('invalid JSON from LLM → graceful handling (score undefined, raw text as feedback)', async () => {

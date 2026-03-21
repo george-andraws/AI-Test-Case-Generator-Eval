@@ -166,3 +166,102 @@ describe('storage file operations', () => {
     expect(products[0].slug).toBe(mod.urlToSlug(baseRevision.url));
   });
 });
+
+// ── updateRevision tests ───────────────────────────────────────────────────────
+
+describe('updateRevision', () => {
+  let tmpDir: string;
+  let mod: typeof import('../../src/lib/storage');
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'update-revision-test-'));
+    jest.spyOn(process, 'cwd').mockReturnValue(tmpDir);
+    jest.resetModules();
+    mod = require('../../src/lib/storage') as typeof import('../../src/lib/storage');
+  });
+
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  test('patches human scores into a saved revision', async () => {
+    const slug = mod.urlToSlug(baseRevision.url);
+    await mod.saveRevision({ ...baseRevision, scores: { human: { claude: null }, judges: {} } });
+
+    await mod.updateRevision(slug, 1, { scores: { human: { claude: 5 } } });
+
+    const updated = await mod.readRevision(slug, 1);
+    expect(updated!.scores.human.claude).toBe(5);
+  });
+
+  test('patches judge scores without clobbering existing data', async () => {
+    const slug = mod.urlToSlug(baseRevision.url);
+    await mod.saveRevision({ ...baseRevision, scores: { human: { claude: 3 }, judges: {} } });
+
+    const judgeScores = {
+      'claude-judge': { claude: { score: 4, feedback: 'Nice', langfuseTraceId: 'trace-j1' } },
+    };
+    await mod.updateRevision(slug, 1, { scores: { judges: judgeScores } });
+
+    const updated = await mod.readRevision(slug, 1);
+    // Human score preserved
+    expect(updated!.scores.human.claude).toBe(3);
+    // Judge score added
+    expect(updated!.scores.judges['claude-judge']['claude'].score).toBe(4);
+  });
+
+  test('merges new judge into existing judges without removing others', async () => {
+    const slug = mod.urlToSlug(baseRevision.url);
+    const initialJudges = {
+      'judge-a': { claude: { score: 3, feedback: 'OK', langfuseTraceId: 'trace-a' } },
+    };
+    await mod.saveRevision({ ...baseRevision, scores: { human: {}, judges: initialJudges } });
+
+    await mod.updateRevision(slug, 1, {
+      scores: {
+        judges: { 'judge-b': { claude: { score: 5, feedback: 'Great', langfuseTraceId: 'trace-b' } } },
+      },
+    });
+
+    const updated = await mod.readRevision(slug, 1);
+    expect(updated!.scores.judges['judge-a']).toBeDefined();
+    expect(updated!.scores.judges['judge-b']).toBeDefined();
+  });
+
+  test('throws when slug file does not exist', async () => {
+    await expect(
+      mod.updateRevision('nonexistent-slug', 1, { scores: { human: { claude: 4 } } })
+    ).rejects.toThrow();
+  });
+
+  test('throws when revision number not found', async () => {
+    const slug = mod.urlToSlug(baseRevision.url);
+    await mod.saveRevision(baseRevision);
+    await expect(
+      mod.updateRevision(slug, 99, { scores: { human: { claude: 4 } } })
+    ).rejects.toThrow('99');
+  });
+
+  test('empty patch leaves revision unchanged', async () => {
+    const slug = mod.urlToSlug(baseRevision.url);
+    await mod.saveRevision(baseRevision);
+    await mod.updateRevision(slug, 1, {});
+    const updated = await mod.readRevision(slug, 1);
+    expect(updated!.scores.human.claude).toBe(4);
+    expect(updated!.generations.claude.output).toBe(baseRevision.generations.claude.output);
+  });
+
+  test('only the patched revision is modified; others are untouched', async () => {
+    const slug = mod.urlToSlug(baseRevision.url);
+    await mod.saveRevision(baseRevision);
+    await mod.saveRevision({ ...baseRevision, scores: { human: { claude: 2 }, judges: {} } });
+
+    await mod.updateRevision(slug, 2, { scores: { human: { claude: 5 } } });
+
+    const rev1 = await mod.readRevision(slug, 1);
+    const rev2 = await mod.readRevision(slug, 2);
+    expect(rev1!.scores.human.claude).toBe(4); // unchanged
+    expect(rev2!.scores.human.claude).toBe(5); // updated
+  });
+});

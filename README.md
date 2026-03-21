@@ -135,3 +135,63 @@ Scores were visible in Langfuse but OTEL traces were not. This pointed to the `L
 3. **Trace input/output fields null or "undefined" in Langfuse.** Two attribute issues: (a) `langfuse.observation.output` was set to a raw string (`response.text`), but Langfuse's OTEL endpoint JSON-parses attribute values — a plain text string fails to parse and is dropped. Fix: wrap with `JSON.stringify(response.text)`. (b) The observation type was never declared, so Langfuse defaulted to SPAN (not GENERATION), which uses different input/output field mapping. Fix: add `span.setAttribute("langfuse.observation.type", "GENERATION")`.
 
 **Key finding on the dual `@opentelemetry/api` packages:** Next.js bundles its own copy of `@opentelemetry/api` (v1.6.0) alongside the project's top-level install (v1.9.0). Both use `Symbol.for('opentelemetry.js.api.1')` on the Node.js `global` object to share a registry, and the compatibility check in v1.6.0 accepts v1.9.0 as compatible (same major, higher minor). So both instances correctly share the same registered tracer provider. This was initially suspected as the root cause but ruled out after inspecting the bundled source.
+
+---
+
+### Session 3 — 2026-03-21
+
+**Focus:** Two independent workstreams — adding a comprehensive Jest test suite, and restructuring data persistence from a single all-at-once save to three incremental save points.
+
+---
+
+#### Jest Test Suite (88 tests, 10 files)
+
+The codebase had no automated tests. A full suite was added under `__tests__/` covering all major concerns without modifying any existing source files.
+
+**Setup decisions:**
+
+- `jest.config.ts` + `tsconfig.test.json`: The project's main `tsconfig.json` uses `"moduleResolution": "bundler"`, which is incompatible with `ts-jest`. A separate `tsconfig.test.json` overrides to `"module": "CommonJS"` and `"moduleResolution": "node"`. This avoids touching the production TS config.
+- `moduleNameMapper`: Maps `@/*` path aliases so tests can import from `@/lib/...` the same way source files do.
+- `clearMocks: true`: Resets all mock state between tests automatically.
+
+**Test files and what they cover:**
+
+| File | Tests | What it covers |
+|---|---|---|
+| `__tests__/lib/config.test.ts` | 10 | Field presence, valid providers, no duplicate IDs, temperature/maxToken ranges |
+| `__tests__/lib/storage.test.ts` | 15 | `urlToSlug` purity, file creation, revision numbering, `listProducts`, isolation via `process.cwd` spy + `jest.resetModules()` |
+| `__tests__/lib/judge-parsing.test.ts` | 7 | Three-tier JSON parser via mocked judge route: raw JSON, markdown-fenced JSON, first-`{...}`-block fallback |
+| `__tests__/lib/self-evaluation.test.ts` | 3 | `selfEvaluation` flag: same provider+model → true, same provider/diff model → false, diff provider → false |
+| `__tests__/lib/prompt-assembly.test.ts` | 12 | Generator and judge prompt format via mocked routes |
+| `__tests__/api/generate.test.ts` | 10 | 200/400 responses, partial failure, response shape |
+| `__tests__/api/judge.test.ts` | 10 | 200/400, self-eval detection, partial failure, unparseable response |
+| `__tests__/api/data.test.ts` | 10 | GET/POST/PATCH revision handling, 404, validation |
+| `__tests__/api/products.test.ts` | 3 | Empty/populated list, response shape |
+| `__tests__/lib/llm/router.test.ts` | 8 | Provider routing, unknown provider error, field pass-through |
+
+**Key testing challenges:**
+
+- **Storage isolation**: Each storage test needs an isolated temp directory. The `DATA_DIR` constant is module-level, so `jest.spyOn(process, 'cwd').mockReturnValue(tmpDir)` combined with `jest.resetModules()` + dynamic `require()` in `beforeEach` gives each test a fresh module instance pointing to its own directory.
+- **`__esModule: true` on config mocks**: Without it, `ts-jest`'s `esModuleInterop` wraps the default export in an extra `{ default: ... }` layer, making `config.judges` inaccessible. All config mocks need `__esModule: true`.
+- **`req.nextUrl` on GET test requests**: Next.js `NextRequest` exposes `nextUrl` as a read-only `URL` instance. Test helpers must add it via `Object.defineProperty` — standard property assignment is silently ignored.
+
+---
+
+#### Incremental Data Persistence
+
+**Problem:** The original flow only saved data when the user clicked "Submit scores." If the page was refreshed or closed after generation but before scoring, all results were lost. Generations and judge scores — which can take 30+ seconds to complete — were ephemeral until the final button click.
+
+**Solution:** Three save points, each writing only what it knows at that moment using a new `PATCH /api/data` endpoint that deep-merges into the existing revision.
+
+**Save Point 1 — After generation completes:** A full `POST /api/data` is fired immediately, creating the revision on disk with all generation outputs (text, token counts, latency, trace IDs) and null human scores. The returned revision number is stored in `currentRevisionId` React state. The product/revision selector refreshes right away so the new revision appears in the UI.
+
+**Save Point 2 — After judging completes:** Judge results are collected from the settled promises (not from React state, which may still be updating) and a `PATCH /api/data` fires to merge judge scores into the already-saved revision. This is fire-and-forget — a failure here doesn't block the user.
+
+**Save Point 3 — On human score submit:** If `currentRevisionId` is set, only human scores are PATCHed (the revision already has everything else). If it's null (e.g., disk error at Save Point 1, or re-running against a loaded historical revision), a full `POST` is sent as a fallback. The Langfuse score submission is unchanged.
+
+**Key implementation decisions:**
+
+- **`updateRevision()` uses deep-merge, not replace**: Generations and scores are spread-merged at each level so Save Point 2 doesn't clobber anything written by Save Point 1, and vice versa. Judge scores are merged at two levels: `judges[judgeId][generatorId]`.
+- **Judge scores sent to Langfuse immediately**: `scoreTrace` is now called inside `/api/judge` after results are assembled, rather than waiting for the human submit. This means judge scores appear in Langfuse as soon as judging finishes, independent of whether the user ever submits human scores.
+- **`capturedForm` snapshot**: `handleGenerate` captures the form values at invocation time (`const capturedForm = form`) so that even if the user edits the form while generation/judging is running, the saved revision reflects what was submitted.
+- **UI hint update**: The "Next generation will create: Revision N" hint changes to "Current session: Revision N" once a revision is saved, giving the user confirmation that data is already persisted.

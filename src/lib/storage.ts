@@ -123,6 +123,64 @@ export async function saveRevision(
   return revision;
 }
 
+// ── Patch ─────────────────────────────────────────────────────────────────────
+
+export interface RevisionPatch {
+  generations?: RevisionData["generations"];
+  scores?: {
+    human?: RevisionData["scores"]["human"];
+    judges?: RevisionData["scores"]["judges"];
+  };
+}
+
+/**
+ * Deep-merges a patch into an existing revision on disk.
+ * Generations and scores are merged (not replaced) so each save point only
+ * needs to send the fields it owns.
+ */
+export async function updateRevision(
+  slug: string,
+  revision: number,
+  patch: RevisionPatch
+): Promise<void> {
+  await ensureDataDir();
+
+  const revisions = await readRevisions(slug);
+  if (!revisions) throw new Error(`No data found for slug: ${slug}`);
+
+  const idx = revisions.findIndex((r) => r.revision === revision);
+  if (idx === -1) throw new Error(`Revision ${revision} not found for slug: ${slug}`);
+
+  const existing = revisions[idx];
+
+  revisions[idx] = {
+    ...existing,
+    ...(patch.generations !== undefined && {
+      generations: { ...existing.generations, ...patch.generations },
+    }),
+    ...(patch.scores !== undefined && {
+      scores: {
+        human: { ...existing.scores.human, ...(patch.scores.human ?? {}) },
+        judges: mergeJudgeScores(existing.scores.judges, patch.scores.judges),
+      },
+    }),
+  };
+
+  await fs.writeFile(slugToFilePath(slug), JSON.stringify(revisions, null, 2), "utf-8");
+}
+
+function mergeJudgeScores(
+  existing: RevisionData["scores"]["judges"],
+  patch: RevisionData["scores"]["judges"] | undefined
+): RevisionData["scores"]["judges"] {
+  if (!patch) return existing;
+  const merged = { ...existing };
+  for (const [judgeId, genMap] of Object.entries(patch)) {
+    merged[judgeId] = { ...(merged[judgeId] ?? {}), ...genMap };
+  }
+  return merged;
+}
+
 // ── List ──────────────────────────────────────────────────────────────────────
 
 export interface ProductSummary {

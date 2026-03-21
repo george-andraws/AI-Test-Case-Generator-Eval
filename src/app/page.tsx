@@ -82,6 +82,9 @@ export default function Page() {
   const [panels, setPanels] = useState<GeneratorPanel[]>([]);
   const [judgeResults, setJudgeResults] = useState<JudgeResultsMap>({});
 
+  // ── Incremental persistence ───────────────────────────────────────────────
+  const [currentRevisionId, setCurrentRevisionId] = useState<number | null>(null);
+
   // ── Score submission ──────────────────────────────────────────────────────
   const [submitStatus, setSubmitStatus] = useState<SubmitStatus>("idle");
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -151,6 +154,7 @@ export default function Page() {
     setPanels([]);
     setJudgeResults({});
     setSubmitStatus("idle");
+    setCurrentRevisionId(null);
     if (!url) { setForm(EMPTY_FORM); setRevisions([]); setSelectedRevision("new"); return; }
     await fetchRevisions(url);
   }
@@ -183,6 +187,7 @@ export default function Page() {
     setSubmitStatus("idle");
     setSubmitError(null);
     setJudgeResults({});
+    setCurrentRevisionId(null);
 
     // Reset all panels to loading
     setPanels(
@@ -192,16 +197,29 @@ export default function Page() {
       }))
     );
 
+    // Capture form values now so they stay consistent through the async flow
+    const capturedForm = form;
+
     // Fire one request per generator model in parallel
-    const generatorPromises = config.generators.map(async (model) => {
+    type GenSuccess = {
+      model: typeof config.generators[0];
+      result: {
+        output: string;
+        tokenUsage: { input: number; output: number };
+        latencyMs: number;
+        langfuseTraceId: string;
+      };
+    };
+
+    const generatorPromises = config.generators.map(async (model): Promise<GenSuccess | null> => {
       try {
         const res = await fetch("/api/generate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            url: form.url,
-            testMethodology: form.testMethodology,
-            productRequirements: form.productRequirements,
+            url: capturedForm.url,
+            testMethodology: capturedForm.testMethodology,
+            productRequirements: capturedForm.productRequirements,
             modelId: model.id,
           }),
         });
@@ -237,13 +255,61 @@ export default function Page() {
 
     const genOutcomes = await Promise.allSettled(generatorPromises);
     const successful = genOutcomes
-      .filter(
-        (r): r is PromiseFulfilledResult<{ model: typeof config.generators[0]; result: { output: string; langfuseTraceId: string } }> =>
-          r.status === "fulfilled" && r.value !== null
+      .filter((r): r is PromiseFulfilledResult<GenSuccess> =>
+        r.status === "fulfilled" && r.value !== null
       )
       .map((r) => r.value);
 
     if (successful.length === 0) { setPhase("done"); return; }
+
+    // ── Save Point 1: Persist generation results immediately ──────────────
+    const generationsForSave: RevisionData["generations"] = {};
+    for (const { model, result } of successful) {
+      generationsForSave[model.id] = {
+        output: result.output,
+        tokenUsage: result.tokenUsage,
+        latencyMs: result.latencyMs,
+        langfuseTraceId: result.langfuseTraceId,
+      };
+    }
+
+    // Initialize human scores to null for each successful generator
+    const initialHumanScores: RevisionData["scores"]["human"] = {};
+    for (const { model } of successful) {
+      initialHumanScores[model.id] = null;
+    }
+
+    let savedRevisionId: number | null = null;
+    try {
+      const saveRes = await fetch("/api/data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: capturedForm.url,
+          prompts: {
+            testMethodology: capturedForm.testMethodology,
+            productRequirements: capturedForm.productRequirements,
+            judgePrompt: capturedForm.judgePrompt,
+          },
+          revisionNotes: capturedForm.revisionNotes,
+          images: [],
+          configSnapshot: {
+            generators: config.generators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+            judges: config.judges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+          },
+          generations: generationsForSave,
+          scores: { human: initialHumanScores, judges: {} },
+        } satisfies Omit<RevisionData, "revision" | "timestamp">),
+      });
+      if (saveRes.ok) {
+        const saveData = await saveRes.json();
+        savedRevisionId = saveData.revision ?? null;
+        setCurrentRevisionId(savedRevisionId);
+        // Refresh so the product selector shows this URL
+        setSelectedUrl(capturedForm.url);
+        await Promise.allSettled([fetchRevisions(capturedForm.url), fetchProducts()]);
+      }
+    } catch { /* non-critical — judging proceeds regardless */ }
 
     // ── Kick off judging ───────────────────────────────────────────────────
     setPhase("judging");
@@ -260,18 +326,26 @@ export default function Page() {
       return init;
     });
 
+    type JudgePatchEntry = {
+      judgeId: string;
+      generatorId: string;
+      score: number;
+      feedback: string;
+      langfuseTraceId: string;
+    };
+
     // Fire all judge × generator combinations in parallel
     const judgePromises = config.judges.flatMap((judge) =>
-      successful.map(async ({ model, result }) => {
+      successful.map(async ({ model, result }): Promise<JudgePatchEntry | null> => {
         try {
           const res = await fetch("/api/judge", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               judgeId: judge.id,
-              url: form.url,
-              productRequirements: form.productRequirements,
-              judgePrompt: form.judgePrompt,
+              url: capturedForm.url,
+              productRequirements: capturedForm.productRequirements,
+              judgePrompt: capturedForm.judgePrompt,
               generations: { [model.id]: { modelName: model.name, output: result.output } },
             }),
           });
@@ -294,6 +368,17 @@ export default function Page() {
                 : { status: "error", error: data.error ?? "Request failed" },
             },
           }));
+
+          if (jr?.success && jr.score !== undefined && jr.langfuseTraceId) {
+            return {
+              judgeId: judge.id,
+              generatorId: model.id,
+              score: jr.score,
+              feedback: jr.feedback ?? "",
+              langfuseTraceId: jr.langfuseTraceId,
+            };
+          }
+          return null;
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           setJudgeResults((prev) => ({
@@ -303,11 +388,36 @@ export default function Page() {
               [model.id]: { status: "error", error: message },
             },
           }));
+          return null;
         }
       })
     );
 
-    await Promise.allSettled(judgePromises);
+    const judgeOutcomes = await Promise.allSettled(judgePromises);
+
+    // ── Save Point 2: Patch judge scores ──────────────────────────────────
+    if (savedRevisionId !== null) {
+      const judgesScoresPatch: RevisionData["scores"]["judges"] = {};
+      for (const outcome of judgeOutcomes) {
+        if (outcome.status === "fulfilled" && outcome.value !== null) {
+          const { judgeId, generatorId, score, feedback, langfuseTraceId } = outcome.value;
+          if (!judgesScoresPatch[judgeId]) judgesScoresPatch[judgeId] = {};
+          judgesScoresPatch[judgeId][generatorId] = { score, feedback, langfuseTraceId };
+        }
+      }
+      if (Object.keys(judgesScoresPatch).length > 0) {
+        fetch("/api/data", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: capturedForm.url,
+            revision: savedRevisionId,
+            scores: { judges: judgesScoresPatch },
+          }),
+        }).catch(() => {}); // fire-and-forget, non-critical
+      }
+    }
+
     setPhase("done");
   }
 
@@ -337,67 +447,77 @@ export default function Page() {
       langfuseOk = false;
     }
 
-    // Build generations map — only store successful completions
-    const generations: RevisionData["generations"] = {};
-    for (const panel of successfulPanels) {
-      if (panel.output && panel.tokenUsage && panel.latencyMs && panel.langfuseTraceId) {
-        generations[panel.id] = {
-          output: panel.output,
-          tokenUsage: panel.tokenUsage,
-          latencyMs: panel.latencyMs,
-          langfuseTraceId: panel.langfuseTraceId,
-        };
-      }
-    }
-
-    // Build scores.judges — only store successful judge results
-    const judgesScores: RevisionData["scores"]["judges"] = {};
-    for (const [judgeId, genMap] of Object.entries(judgeResults)) {
-      for (const [genId, entry] of Object.entries(genMap)) {
-        if (entry.status === "success" && entry.score !== undefined && entry.feedback && entry.langfuseTraceId) {
-          if (!judgesScores[judgeId]) judgesScores[judgeId] = {};
-          judgesScores[judgeId][genId] = {
-            score: entry.score,
-            feedback: entry.feedback,
-            langfuseTraceId: entry.langfuseTraceId,
-          };
-        }
-      }
-    }
-
-    // Build scores.human — all successful panels, null for unscored
+    // Build human scores map
     const humanScores: RevisionData["scores"]["human"] = {};
     for (const panel of successfulPanels) {
       humanScores[panel.id] = panel.humanScore ?? null;
     }
 
-    const revisionPayload: Omit<RevisionData, "revision" | "timestamp"> = {
-      url: form.url,
-      prompts: {
-        testMethodology: form.testMethodology,
-        productRequirements: form.productRequirements,
-        judgePrompt: form.judgePrompt,
-      },
-      revisionNotes: form.revisionNotes,
-      images: [],
-      configSnapshot: {
-        generators: config.generators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
-        judges: config.judges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
-      },
-      generations,
-      scores: { human: humanScores, judges: judgesScores },
-    };
-
     try {
-      await fetch("/api/data", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(revisionPayload),
-      });
-      // Refresh products + revisions so trends update, and select this URL
+      if (currentRevisionId !== null) {
+        // ── Save Point 3: PATCH with human scores only ──────────────────
+        await fetch("/api/data", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: form.url,
+            revision: currentRevisionId,
+            scores: { human: humanScores },
+          }),
+        });
+      } else {
+        // ── Fallback: full POST (e.g. loading a past revision) ──────────
+        const generations: RevisionData["generations"] = {};
+        for (const panel of successfulPanels) {
+          if (panel.output && panel.tokenUsage && panel.latencyMs && panel.langfuseTraceId) {
+            generations[panel.id] = {
+              output: panel.output,
+              tokenUsage: panel.tokenUsage,
+              latencyMs: panel.latencyMs,
+              langfuseTraceId: panel.langfuseTraceId,
+            };
+          }
+        }
+
+        const judgesScores: RevisionData["scores"]["judges"] = {};
+        for (const [judgeId, genMap] of Object.entries(judgeResults)) {
+          for (const [genId, entry] of Object.entries(genMap)) {
+            if (entry.status === "success" && entry.score !== undefined && entry.feedback && entry.langfuseTraceId) {
+              if (!judgesScores[judgeId]) judgesScores[judgeId] = {};
+              judgesScores[judgeId][genId] = {
+                score: entry.score,
+                feedback: entry.feedback,
+                langfuseTraceId: entry.langfuseTraceId,
+              };
+            }
+          }
+        }
+
+        await fetch("/api/data", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: form.url,
+            prompts: {
+              testMethodology: form.testMethodology,
+              productRequirements: form.productRequirements,
+              judgePrompt: form.judgePrompt,
+            },
+            revisionNotes: form.revisionNotes,
+            images: [],
+            configSnapshot: {
+              generators: config.generators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+              judges: config.judges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+            },
+            generations,
+            scores: { human: humanScores, judges: judgesScores },
+          } satisfies Omit<RevisionData, "revision" | "timestamp">),
+        });
+      }
+
+      // Refresh products + revisions so trends update
       setSelectedUrl(form.url);
-      await fetchRevisions(form.url);
-      await fetchProducts();
+      await Promise.allSettled([fetchRevisions(form.url), fetchProducts()]);
     } catch { /* disk save failed — still show result */ }
 
     if (langfuseOk) {
@@ -469,8 +589,10 @@ export default function Page() {
             </div>
           </div>
           <p className="mt-3 text-xs text-gray-400">
-            Next submission will create:{" "}
-            <span className="font-medium text-gray-600">Revision {nextRevisionNumber}</span>
+            {currentRevisionId !== null
+              ? <>Current session: <span className="font-medium text-gray-600">Revision {currentRevisionId}</span></>
+              : <>Next generation will create: <span className="font-medium text-gray-600">Revision {nextRevisionNumber}</span></>
+            }
           </p>
         </div>
 
@@ -592,7 +714,7 @@ export default function Page() {
                     ? "Scores submitted ✓"
                     : submitStatus === "submitting"
                     ? "Submitting…"
-                    : "Submit scores to Langfuse"}
+                    : "Submit human scores"}
                 </button>
 
                 {!allScored && submitStatus === "idle" && (
