@@ -10,7 +10,7 @@ import { initTracing, callLLM, flushTracing } from "../src/lib/llm";
 import type { LLMRequest } from "../src/lib/llm";
 
 const SYSTEM_PROMPT = "You are a concise assistant. Always reply in one sentence.";
-const USER_PROMPT = "Reply with exactly one sentence: what is 1 + 2 and why?";
+const USER_PROMPT = "Reply with exactly one sentence: what is 3 + 2 and why?";
 
 const requests: LLMRequest[] = [
   {
