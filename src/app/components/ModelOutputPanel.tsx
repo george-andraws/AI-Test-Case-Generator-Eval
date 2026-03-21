@@ -1,3 +1,6 @@
+import { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { ModelConfig } from "@/lib/config";
 import { ScoreSelector } from "./ScoreSelector";
 import { JudgeScoreSection, type JudgePanelEntry } from "./JudgeScoreSection";
@@ -47,7 +50,34 @@ function StatusDot({ status }: { status: GeneratorPanel["status"] }) {
   return null;
 }
 
+function ClipboardIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect width="8" height="4" x="8" y="2" rx="1" ry="1" />
+      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
 export function ModelOutputPanel({ panel, judgeModels, judgeResults, onScoreChange }: Props) {
+  const [copied, setCopied] = useState(false);
+
+  function handleCopy() {
+    if (!panel.output) return;
+    navigator.clipboard.writeText(panel.output).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   const totalTokens =
     panel.tokenUsage
       ? (panel.tokenUsage.input + panel.tokenUsage.output).toLocaleString()
@@ -57,13 +87,26 @@ export function ModelOutputPanel({ panel, judgeModels, judgeResults, onScoreChan
     : null;
 
   return (
-    <div className="flex flex-col border border-gray-200 rounded-lg bg-white min-w-80 w-80 shrink-0 overflow-hidden">
+    <div className="flex flex-col border border-gray-200 rounded-lg bg-white flex-1 min-w-0 overflow-hidden">
       {/* ── Header ── */}
       <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-3">
         <StatusDot status={panel.status} />
         <span className="text-sm font-semibold text-gray-800 truncate">{panel.name}</span>
         {panel.status === "loading" && (
           <span className="ml-auto text-xs text-gray-400">Generating…</span>
+        )}
+        {panel.status === "success" && panel.output && (
+          <button
+            onClick={handleCopy}
+            aria-label={copied ? "Copied" : "Copy output"}
+            className={`ml-auto flex items-center justify-center rounded p-1 transition-colors ${
+              copied
+                ? "text-green-600 hover:text-green-700"
+                : "text-gray-400 hover:text-gray-600"
+            }`}
+          >
+            {copied ? <CheckIcon /> : <ClipboardIcon />}
+          </button>
         )}
       </div>
 
@@ -79,9 +122,9 @@ export function ModelOutputPanel({ panel, judgeModels, judgeResults, onScoreChan
         )}
 
         {panel.status === "success" && panel.output && (
-          <pre className="p-4 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
-            {panel.output}
-          </pre>
+          <div className="prose prose-sm max-w-none p-4">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{panel.output}</ReactMarkdown>
+          </div>
         )}
       </div>
 

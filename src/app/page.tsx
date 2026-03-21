@@ -750,8 +750,11 @@ export default function Page() {
               Model Outputs
             </h2>
 
-            {/* Horizontally scrollable row of panels */}
-            <div className="flex gap-4 overflow-x-auto pb-3">
+            {/* Full-width grid of panels */}
+            <div
+              className="grid gap-4 w-full"
+              style={{ gridTemplateColumns: `repeat(${panels.length}, minmax(0, 1fr))` }}
+            >
               {panels.map((panel) => (
                 <ModelOutputPanel
                   key={panel.id}
