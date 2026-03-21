@@ -1,0 +1,202 @@
+import { POST } from '../../src/app/api/judge/route';
+import { callLLM } from '../../src/lib/llm';
+
+jest.mock('../../src/lib/llm', () => ({
+  callLLM: jest.fn(),
+  flushSpans: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../../src/lib/config', () => ({
+  __esModule: true,
+  default: {
+    generators: [
+      {
+        id: 'claude',
+        name: 'Claude',
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-20250514',
+        apiKeyEnvVar: 'ANTHROPIC_API_KEY',
+        maxTokens: 4096,
+        temperature: 0.3,
+      },
+      {
+        id: 'gpt',
+        name: 'GPT',
+        provider: 'openai',
+        model: 'gpt-4.1',
+        apiKeyEnvVar: 'OPENAI_API_KEY',
+        maxTokens: 4096,
+        temperature: 0.3,
+      },
+    ],
+    judges: [
+      {
+        id: 'claude-judge',
+        name: 'Claude Judge',
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-20250514',
+        apiKeyEnvVar: 'ANTHROPIC_API_KEY',
+        maxTokens: 8192,
+        temperature: 0.2,
+      },
+      {
+        id: 'gpt-judge',
+        name: 'GPT Judge',
+        provider: 'openai',
+        model: 'gpt-4.1',
+        apiKeyEnvVar: 'OPENAI_API_KEY',
+        maxTokens: 8192,
+        temperature: 0.2,
+      },
+    ],
+    langfuse: {
+      publicKeyEnvVar: 'LANGFUSE_PUBLIC_KEY',
+      secretKeyEnvVar: 'LANGFUSE_SECRET_KEY',
+      baseUrl: 'https://us.cloud.langfuse.com',
+    },
+  },
+}));
+
+const mockCallLLM = callLLM as jest.Mock;
+
+const defaultLLMResponse = {
+  text: '{"score": 4, "feedback": "Good coverage"}',
+  tokenUsage: { input: 10, output: 20 },
+  latencyMs: 100,
+  traceId: 'trace-abc123',
+};
+
+function makeRequest(body: unknown) {
+  return new Request('http://localhost/api/judge', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+const validBody = {
+  url: 'http://test.com',
+  productRequirements: 'Requirements here',
+  judgePrompt: 'Judge carefully',
+  generations: {
+    claude: { modelName: 'Claude', output: 'Test cases...' },
+  },
+};
+
+describe('POST /api/judge', () => {
+  beforeEach(() => {
+    mockCallLLM.mockResolvedValue(defaultLLMResponse);
+  });
+
+  test('valid request → 200, results for each judge×generator combo', async () => {
+    const req = makeRequest(validBody);
+    const res = await POST(req as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.results).toBeDefined();
+    expect(data.results['claude-judge']).toBeDefined();
+    expect(data.results['claude-judge']['claude']).toBeDefined();
+    expect(data.results['gpt-judge']).toBeDefined();
+    expect(data.results['gpt-judge']['claude']).toBeDefined();
+  });
+
+  test('missing url → 400', async () => {
+    const req = makeRequest({
+      productRequirements: 'Requirements here',
+      judgePrompt: 'Judge carefully',
+      generations: { claude: { modelName: 'Claude', output: 'Test cases...' } },
+    });
+    const res = await POST(req as any);
+    expect(res.status).toBe(400);
+  });
+
+  test('missing productRequirements → 400', async () => {
+    const req = makeRequest({
+      url: 'http://test.com',
+      judgePrompt: 'Judge carefully',
+      generations: { claude: { modelName: 'Claude', output: 'Test cases...' } },
+    });
+    const res = await POST(req as any);
+    expect(res.status).toBe(400);
+  });
+
+  test('missing judgePrompt → 400', async () => {
+    const req = makeRequest({
+      url: 'http://test.com',
+      productRequirements: 'Requirements here',
+      generations: { claude: { modelName: 'Claude', output: 'Test cases...' } },
+    });
+    const res = await POST(req as any);
+    expect(res.status).toBe(400);
+  });
+
+  test('missing generations → 400', async () => {
+    const req = makeRequest({
+      url: 'http://test.com',
+      productRequirements: 'Requirements here',
+      judgePrompt: 'Judge carefully',
+    });
+    const res = await POST(req as any);
+    expect(res.status).toBe(400);
+  });
+
+  test('judgeId filter → only runs that judge', async () => {
+    const req = makeRequest({ ...validBody, judgeId: 'claude-judge' });
+    const res = await POST(req as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.results['claude-judge']).toBeDefined();
+    expect(data.results['gpt-judge']).toBeUndefined();
+  });
+
+  test('unknown judgeId → 400', async () => {
+    const req = makeRequest({ ...validBody, judgeId: 'nonexistent-judge' });
+    const res = await POST(req as any);
+    expect(res.status).toBe(400);
+  });
+
+  test('self-evaluation detected correctly (claude judge + claude generator)', async () => {
+    const req = makeRequest({ ...validBody, judgeId: 'claude-judge' });
+    const res = await POST(req as any);
+    const data = await res.json();
+    expect(data.results['claude-judge']['claude'].selfEvaluation).toBe(true);
+  });
+
+  test('partial failure handled', async () => {
+    mockCallLLM
+      .mockRejectedValueOnce(new Error('Claude judge failed'))
+      .mockResolvedValueOnce(defaultLLMResponse);
+
+    const req = makeRequest(validBody);
+    const res = await POST(req as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    // One should fail, one should succeed
+    const results = data.results;
+    const allResults = Object.values(results).flatMap((judgeResults) =>
+      Object.values(judgeResults as Record<string, { success: boolean }>)
+    );
+    const failures = allResults.filter((r) => !r.success);
+    const successes = allResults.filter((r) => r.success);
+    expect(failures.length).toBeGreaterThan(0);
+    expect(successes.length).toBeGreaterThan(0);
+  });
+
+  test('invalid JSON from LLM → graceful handling (score undefined, raw text as feedback)', async () => {
+    mockCallLLM.mockResolvedValue({
+      text: 'This is just prose with no JSON at all',
+      tokenUsage: { input: 10, output: 20 },
+      latencyMs: 100,
+      traceId: 'trace-xyz',
+    });
+
+    const req = makeRequest({ ...validBody, judgeId: 'gpt-judge' });
+    const res = await POST(req as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    const result = data.results['gpt-judge']['claude'];
+    expect(result.success).toBe(true);
+    expect(result.score).toBeUndefined();
+    expect(result.feedback).toBe('This is just prose with no JSON at all');
+  });
+});
