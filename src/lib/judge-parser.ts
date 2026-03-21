@@ -1,4 +1,4 @@
-export interface JudgeScore {
+export interface JudgeScore extends Record<string, unknown> {
   score: number;
   feedback: string;
 }

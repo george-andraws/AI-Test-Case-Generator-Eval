@@ -171,10 +171,10 @@ describe('judge prompt assembly (via judge route)', () => {
     expect(callArgs.userPrompt).toContain(generatorOutput);
   });
 
-  test('userPrompt contains scoring scale language (0 to 5)', async () => {
+  test('userPrompt contains scoring scale language (0–5)', async () => {
     const callArgs = await callJudgeRoute();
     expect(callArgs.userPrompt).toMatch(/0.*5|Score.*0.*5|scale/i);
-    expect(callArgs.userPrompt).toContain('0 to 5');
+    expect(callArgs.userPrompt).toMatch(/0-5|0 to 5/);
   });
 
   test('userPrompt contains JSON format instruction', async () => {

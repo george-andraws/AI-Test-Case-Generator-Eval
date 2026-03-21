@@ -122,14 +122,35 @@ describe('POST /api/judge', () => {
     expect(res.status).toBe(400);
   });
 
-  test('missing judgePrompt → 400', async () => {
+  test('missing judgePrompt → 200 (judgePrompt is optional)', async () => {
     const req = makeRequest({
       url: 'http://test.com',
       productRequirements: 'Requirements here',
+      judgeId: 'claude-judge',
       generations: { claude: { modelName: 'Claude', output: 'Test cases...' } },
     });
     const res = await POST(req as any);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.results['claude-judge']['claude'].success).toBe(true);
+  });
+
+  test('empty string judgePrompt → 200 (empty string is valid)', async () => {
+    const req = makeRequest({
+      ...validBody,
+      judgeId: 'claude-judge',
+      judgePrompt: '',
+    });
+    const res = await POST(req as any);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.results['claude-judge']['claude'].success).toBe(true);
+  });
+
+  test('empty string judgePrompt → callLLM receives empty string as systemPrompt', async () => {
+    const req = makeRequest({ ...validBody, judgeId: 'claude-judge', judgePrompt: '' });
+    await POST(req as any);
+    expect(mockCallLLM).toHaveBeenCalledWith(expect.objectContaining({ systemPrompt: '' }));
   });
 
   test('missing generations → 400', async () => {

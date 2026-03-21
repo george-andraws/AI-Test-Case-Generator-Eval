@@ -38,6 +38,7 @@ export interface RevisionData {
           score: number;
           feedback: string;
           langfuseTraceId: string;
+          rawData?: Record<string, unknown>;
         };
       };
     };

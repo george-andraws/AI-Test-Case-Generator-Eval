@@ -115,3 +115,50 @@ describe('judge response parsing', () => {
     }
   });
 });
+
+describe('rawData passthrough', () => {
+  test('simple {score, feedback} response → rawData contains score and feedback', async () => {
+    const result = await callJudgeRoute('{"score": 4, "feedback": "Good coverage"}');
+    expect(result.rawData).toBeDefined();
+    expect(result.rawData.score).toBe(4);
+    expect(result.rawData.feedback).toBe('Good coverage');
+  });
+
+  test('detailed response with extra fields → rawData contains all extra fields', async () => {
+    const detailed = {
+      score: 3,
+      feedback: 'Decent',
+      weighted_total: 2.8,
+      dimensions: {
+        Coverage: { score: 3, adjusted_weight: 0.4, evidence: 'Covers main flows' },
+        'Error Handling': { score: null, adjusted_weight: 0.2, evidence: '' },
+      },
+      applicability: { 'Error Handling': 'No error scenarios defined in requirements' },
+      strengths: ['Clear step descriptions'],
+      critical_gaps: ['Missing boundary tests'],
+      recommendations: ['Add tests for empty input'],
+      overall_vs_weighted_delta: 'Score slightly above weighted due to N/A dimension',
+    };
+    const result = await callJudgeRoute(JSON.stringify(detailed));
+    expect(result.score).toBe(3);
+    expect(result.rawData).toBeDefined();
+    expect(result.rawData.weighted_total).toBe(2.8);
+    expect(result.rawData.dimensions).toBeDefined();
+    expect(result.rawData.applicability).toBeDefined();
+    expect(result.rawData.strengths).toEqual(['Clear step descriptions']);
+    expect(result.rawData.critical_gaps).toEqual(['Missing boundary tests']);
+    expect(result.rawData.recommendations).toEqual(['Add tests for empty input']);
+    expect(result.rawData.overall_vs_weighted_delta).toContain('weighted');
+  });
+
+  test('parse failure (pure prose) → rawData is undefined', async () => {
+    const result = await callJudgeRoute('Just prose, no JSON here.');
+    expect(result.rawData).toBeUndefined();
+  });
+
+  test('JSON in markdown fences with extra fields → rawData preserved', async () => {
+    const inner = JSON.stringify({ score: 5, feedback: 'Excellent', strengths: ['Comprehensive'] });
+    const result = await callJudgeRoute('```json\n' + inner + '\n```');
+    expect(result.rawData.strengths).toEqual(['Comprehensive']);
+  });
+});

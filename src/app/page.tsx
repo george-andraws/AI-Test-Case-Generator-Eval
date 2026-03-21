@@ -208,6 +208,7 @@ export default function Page() {
           status: "success",
           score: judgeScore.score,
           feedback: judgeScore.feedback,
+          rawData: judgeScore.rawData,
           langfuseTraceId: judgeScore.langfuseTraceId,
           selfEvaluation,
         };
@@ -467,6 +468,7 @@ export default function Page() {
       generatorId: string;
       score: number;
       feedback: string;
+      rawData?: Record<string, unknown>;
       langfuseTraceId: string;
     };
 
@@ -500,6 +502,7 @@ export default function Page() {
                     status: jr.success ? "success" : "error",
                     score: jr.score,
                     feedback: jr.feedback,
+                    rawData: jr.rawData,
                     selfEvaluation: jr.selfEvaluation,
                     langfuseTraceId: jr.langfuseTraceId,
                     error: jr.error,
@@ -514,6 +517,7 @@ export default function Page() {
               generatorId: model.id,
               score: jr.score,
               feedback: jr.feedback ?? "",
+              rawData: jr.rawData,
               langfuseTraceId: jr.langfuseTraceId,
             };
           }
@@ -539,9 +543,9 @@ export default function Page() {
       const judgesScoresPatch: RevisionData["scores"]["judges"] = {};
       for (const outcome of judgeOutcomes) {
         if (outcome.status === "fulfilled" && outcome.value !== null) {
-          const { judgeId, generatorId, score, feedback, langfuseTraceId } = outcome.value;
+          const { judgeId, generatorId, score, feedback, rawData, langfuseTraceId } = outcome.value;
           if (!judgesScoresPatch[judgeId]) judgesScoresPatch[judgeId] = {};
-          judgesScoresPatch[judgeId][generatorId] = { score, feedback, langfuseTraceId };
+          judgesScoresPatch[judgeId][generatorId] = { score, feedback, langfuseTraceId, rawData };
         }
       }
       if (Object.keys(judgesScoresPatch).length > 0) {
@@ -627,6 +631,7 @@ export default function Page() {
                 score: entry.score,
                 feedback: entry.feedback,
                 langfuseTraceId: entry.langfuseTraceId,
+                rawData: entry.rawData,
               };
             }
           }
