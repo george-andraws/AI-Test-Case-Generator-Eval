@@ -29,8 +29,8 @@ describe('config', () => {
     }
   });
 
-  test('provider values are "anthropic", "openai", "google", or "grok"', () => {
-    const validProviders = ['anthropic', 'openai', 'google', 'grok'];
+  test('provider values are "anthropic", "openai", "google", "grok", or "openrouter"', () => {
+    const validProviders = ['anthropic', 'openai', 'google', 'grok', 'openrouter'];
     for (const gen of config.generators) {
       expect(validProviders).toContain(gen.provider);
     }

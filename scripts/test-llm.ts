@@ -76,6 +76,21 @@ const requests: LLMRequest[] = [
       tags: ["smoke-test"],
     },
   },
+  {
+    provider: "openrouter",
+    model: "meta-llama/llama-3.1-70b-instruct",
+    systemPrompt: SYSTEM_PROMPT,
+    userPrompt: USER_PROMPT,
+    maxTokens: 128,
+    temperature: 0.3,
+    traceContext: {
+      traceName: "smoke-test: openrouter/llama",
+      role: "generator",
+      url: "http://localhost:3000",
+      revision: 1,
+      tags: ["smoke-test"],
+    },
+  },
 ];
 
 async function main() {

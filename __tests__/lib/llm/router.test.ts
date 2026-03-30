@@ -46,14 +46,24 @@ jest.mock('../../../src/lib/llm/openai', () => ({
 jest.mock('../../../src/lib/llm/google', () => ({
   callGoogle: jest.fn(),
 }));
+jest.mock('../../../src/lib/llm/grok', () => ({
+  callGrok: jest.fn(),
+}));
+jest.mock('../../../src/lib/llm/openrouter', () => ({
+  callOpenRouter: jest.fn(),
+}));
 
 import { callAnthropic } from '../../../src/lib/llm/anthropic';
 import { callOpenAI } from '../../../src/lib/llm/openai';
 import { callGoogle } from '../../../src/lib/llm/google';
+import { callGrok } from '../../../src/lib/llm/grok';
+import { callOpenRouter } from '../../../src/lib/llm/openrouter';
 
 const mockCallAnthropic = callAnthropic as jest.Mock;
 const mockCallOpenAI = callOpenAI as jest.Mock;
 const mockCallGoogle = callGoogle as jest.Mock;
+const mockCallGrok = callGrok as jest.Mock;
+const mockCallOpenRouter = callOpenRouter as jest.Mock;
 
 const baseRequest: LLMRequest = {
   provider: 'anthropic',
@@ -69,6 +79,8 @@ describe('callLLM router', () => {
     mockCallAnthropic.mockResolvedValue({ ...mockAdapterResponse, provider: 'anthropic' });
     mockCallOpenAI.mockResolvedValue({ ...mockAdapterResponse, provider: 'openai' });
     mockCallGoogle.mockResolvedValue({ ...mockAdapterResponse, provider: 'google' });
+    mockCallGrok.mockResolvedValue({ ...mockAdapterResponse, provider: 'grok' });
+    mockCallOpenRouter.mockResolvedValue({ ...mockAdapterResponse, provider: 'openrouter' });
     // Reset span mocks
     mockSpan.setAttribute.mockReturnThis();
     mockSpan.setStatus.mockReturnThis();
@@ -95,6 +107,24 @@ describe('callLLM router', () => {
     expect(mockCallGoogle).toHaveBeenCalledTimes(1);
     expect(mockCallAnthropic).not.toHaveBeenCalled();
     expect(mockCallOpenAI).not.toHaveBeenCalled();
+  });
+
+  test("provider='grok' → callGrok called", async () => {
+    await callLLM({ ...baseRequest, provider: 'grok', model: 'grok-4-1-fast-reasoning' });
+    expect(mockCallGrok).toHaveBeenCalledTimes(1);
+    expect(mockCallAnthropic).not.toHaveBeenCalled();
+    expect(mockCallOpenAI).not.toHaveBeenCalled();
+    expect(mockCallGoogle).not.toHaveBeenCalled();
+    expect(mockCallOpenRouter).not.toHaveBeenCalled();
+  });
+
+  test("provider='openrouter' → callOpenRouter called", async () => {
+    await callLLM({ ...baseRequest, provider: 'openrouter', model: 'meta-llama/llama-3.1-70b-instruct' });
+    expect(mockCallOpenRouter).toHaveBeenCalledTimes(1);
+    expect(mockCallAnthropic).not.toHaveBeenCalled();
+    expect(mockCallOpenAI).not.toHaveBeenCalled();
+    expect(mockCallGoogle).not.toHaveBeenCalled();
+    expect(mockCallGrok).not.toHaveBeenCalled();
   });
 
   test('unknown provider → throws error containing provider name', async () => {

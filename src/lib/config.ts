@@ -1,4 +1,4 @@
-export type Provider = "anthropic" | "openai" | "google" | "grok";
+export type Provider = "anthropic" | "openai" | "google" | "grok" | "openrouter";
 
 export interface ModelConfig {
   id: string;
@@ -25,6 +25,7 @@ export interface AppConfig {
 
 const config: AppConfig = {
   generators: [
+    // ── Direct adapters — primary proprietary models ───────────────────────
     {
       id: "claude",
       name: "Claude Haiku 4.5",   // for dev
@@ -57,15 +58,37 @@ const config: AppConfig = {
       temperature: 0.3,
       enabled: true,
     },
+
+    // ── OpenRouter — open source and additional models ─────────────────────
     {
-      id: "grok",
-      name: "Grok 4.1-fast-reasoning",
-      provider: "grok",
-      model: "grok-4-1-fast-reasoning",
-      apiKeyEnvVar: "XAI_API_KEY",
+      id: "llama",
+      name: "Llama 3.1 70B",
+      provider: "openrouter",
+      model: "meta-llama/llama-3.1-70b-instruct",
+      apiKeyEnvVar: "OPENROUTER_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
       enabled: true,
+    },
+    {
+      id: "grok",
+      name: "Grok 3",
+      provider: "openrouter",
+      model: "x-ai/grok-3",
+      apiKeyEnvVar: "OPENROUTER_API_KEY",
+      maxTokens: 4096,
+      temperature: 0.3,
+      enabled: false,
+    },
+    {
+      id: "mistral",
+      name: "Mistral Large",
+      provider: "openrouter",
+      model: "mistralai/mistral-large",
+      apiKeyEnvVar: "OPENROUTER_API_KEY",
+      maxTokens: 4096,
+      temperature: 0.3,
+      enabled: false,
     },
   ],
 
@@ -104,9 +127,9 @@ const config: AppConfig = {
     },
     {
       id: "grok-judge",
-      name: "Grok 3 (Judge)",
+      name: "Grok 4.1 Fast Reasoning (Judge)",
       provider: "grok",
-      model: "grok-3",
+      model: "grok-4-1-fast-reasoning",
       apiKeyEnvVar: "XAI_API_KEY",
       maxTokens: 2048,
       temperature: 0.2,
