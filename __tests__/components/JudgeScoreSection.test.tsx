@@ -15,6 +15,7 @@ const judgeModel = {
   apiKeyEnvVar: 'OPENAI_API_KEY',
   maxTokens: 8192,
   temperature: 0.2,
+  enabled: true,
 };
 
 function makeEntry(overrides: Partial<JudgePanelEntry> = {}): JudgePanelEntry {

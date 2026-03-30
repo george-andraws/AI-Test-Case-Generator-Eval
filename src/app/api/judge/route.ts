@@ -51,8 +51,8 @@ export async function POST(req: NextRequest) {
   }
 
   const judgesToRun = judgeId
-    ? config.judges.filter((j) => j.id === judgeId)
-    : config.judges;
+    ? config.judges.filter((j) => j.id === judgeId && j.enabled)
+    : config.judges.filter((j) => j.enabled);
 
   if (judgesToRun.length === 0) {
     return NextResponse.json({ error: `Unknown judgeId: ${judgeId}` }, { status: 400 });

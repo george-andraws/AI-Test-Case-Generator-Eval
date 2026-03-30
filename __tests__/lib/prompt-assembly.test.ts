@@ -17,6 +17,7 @@ jest.mock('../../src/lib/config', () => ({
         apiKeyEnvVar: 'ANTHROPIC_API_KEY',
         maxTokens: 4096,
         temperature: 0.3,
+        enabled: true,
       },
     ],
     judges: [
@@ -28,6 +29,7 @@ jest.mock('../../src/lib/config', () => ({
         apiKeyEnvVar: 'OPENAI_API_KEY',
         maxTokens: 8192,
         temperature: 0.2,
+        enabled: true,
       },
     ],
     langfuse: {

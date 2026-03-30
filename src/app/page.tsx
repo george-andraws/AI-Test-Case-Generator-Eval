@@ -97,6 +97,9 @@ export default function Page() {
   const [savedHumanScores, setSavedHumanScores] = useState<Record<string, number | null>>({});
 
   // ── Derived ───────────────────────────────────────────────────────────────
+  const enabledGenerators = config.generators.filter((m) => m.enabled);
+  const enabledJudges = config.judges.filter((j) => j.enabled);
+
   const nextRevisionNumber = selectedUrl && revisions.length > 0 ? revisions.length + 1 : 1;
 
   const successfulPanels = panels.filter((p) => p.status === "success");
@@ -319,7 +322,7 @@ export default function Page() {
 
     // Reset all panels to loading
     setPanels(
-      config.generators.map((m) => ({
+      enabledGenerators.map((m) => ({
         id: m.id, name: m.name, model: m.model,
         status: "loading",
       }))
@@ -331,7 +334,7 @@ export default function Page() {
 
     // Fire one request per generator model in parallel
     type GenSuccess = {
-      model: typeof config.generators[0];
+      model: typeof enabledGenerators[0];
       result: {
         output: string;
         tokenUsage: { input: number; output: number };
@@ -340,7 +343,7 @@ export default function Page() {
       };
     };
 
-    const generatorPromises = config.generators.map(async (model): Promise<GenSuccess | null> => {
+    const generatorPromises = enabledGenerators.map(async (model): Promise<GenSuccess | null> => {
       try {
         const res = await fetch("/api/generate", {
           method: "POST",
@@ -426,8 +429,8 @@ export default function Page() {
           revisionNotes: capturedForm.revisionNotes,
           images: [],
           configSnapshot: {
-            generators: config.generators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
-            judges: config.judges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+            generators: enabledGenerators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+            judges: enabledJudges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
           },
           generations: generationsForSave,
           scores: { human: initialHumanScores, judges: {} },
@@ -454,7 +457,7 @@ export default function Page() {
     // Initialize all judge entries as loading
     setJudgeResults(() => {
       const init: JudgeResultsMap = {};
-      for (const judge of config.judges) {
+      for (const judge of enabledJudges) {
         init[judge.id] = {};
         for (const { model } of successful) {
           init[judge.id][model.id] = { status: "loading" };
@@ -473,7 +476,7 @@ export default function Page() {
     };
 
     // Fire all judge × generator combinations in parallel
-    const judgePromises = config.judges.flatMap((judge) =>
+    const judgePromises = enabledJudges.flatMap((judge) =>
       successful.map(async ({ model, result }): Promise<JudgePatchEntry | null> => {
         try {
           const res = await fetch("/api/judge", {
@@ -650,8 +653,8 @@ export default function Page() {
             revisionNotes: form.revisionNotes,
             images: [],
             configSnapshot: {
-              generators: config.generators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
-              judges: config.judges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+              generators: enabledGenerators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
+              judges: enabledJudges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
             },
             generations,
             scores: { human: humanScores, judges: judgesScores },
@@ -823,8 +826,8 @@ export default function Page() {
             {isRunning && (
               <span className="text-sm text-gray-500">
                 {phase === "generating"
-                  ? `Running ${config.generators.length} generator models in parallel…`
-                  : `Running ${config.judges.length} judge models…`}
+                  ? `Running ${enabledGenerators.length} generator models in parallel…`
+                  : `Running ${enabledJudges.length} judge models…`}
               </span>
             )}
             {!canGenerate && !isRunning && (
@@ -849,10 +852,10 @@ export default function Page() {
                 <ModelOutputPanel
                   key={panel.id}
                   panel={panel}
-                  judgeModels={config.judges}
+                  judgeModels={enabledJudges}
                   judgeResults={
                     Object.fromEntries(
-                      config.judges.map((j) => [j.id, judgeResults[j.id]?.[panel.id] ?? { status: "idle" }])
+                      enabledJudges.map((j) => [j.id, judgeResults[j.id]?.[panel.id] ?? { status: "idle" }])
                     ) as Record<string, JudgePanelEntry>
                   }
                   onScoreChange={(score) => updateHumanScore(panel.id, score)}
@@ -902,8 +905,8 @@ export default function Page() {
         {/* ── Section 4: Scoring Trends ── */}
         <ScoringTrends
           revisions={revisions}
-          generatorModels={config.generators}
-          judgeModels={config.judges}
+          generatorModels={enabledGenerators}
+          judgeModels={enabledJudges}
         />
 
       </div>

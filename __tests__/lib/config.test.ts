@@ -29,13 +29,22 @@ describe('config', () => {
     }
   });
 
-  test('provider values are "anthropic", "openai", or "google"', () => {
-    const validProviders = ['anthropic', 'openai', 'google'];
+  test('provider values are "anthropic", "openai", "google", or "grok"', () => {
+    const validProviders = ['anthropic', 'openai', 'google', 'grok'];
     for (const gen of config.generators) {
       expect(validProviders).toContain(gen.provider);
     }
     for (const judge of config.judges) {
       expect(validProviders).toContain(judge.provider);
+    }
+  });
+
+  test('all generators and judges have enabled boolean', () => {
+    for (const gen of config.generators) {
+      expect(typeof gen.enabled).toBe('boolean');
+    }
+    for (const judge of config.judges) {
+      expect(typeof judge.enabled).toBe('boolean');
     }
   });
 

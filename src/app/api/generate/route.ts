@@ -42,8 +42,8 @@ export async function POST(req: NextRequest) {
     }
 
     const modelsToRun = modelId
-      ? config.generators.filter((m) => m.id === modelId)
-      : config.generators;
+      ? config.generators.filter((m) => m.id === modelId && m.enabled)
+      : config.generators.filter((m) => m.enabled);
 
     if (modelsToRun.length === 0) {
       return NextResponse.json({ error: `Unknown modelId: ${modelId}` }, { status: 400 });

@@ -3,6 +3,7 @@ import { getTracer } from "./tracing";
 import { callAnthropic } from "./anthropic";
 import { callOpenAI } from "./openai";
 import { callGoogle } from "./google";
+import { callGrok } from "./grok";
 import type { LLMRequest, LLMResponse } from "./types";
 
 export type { LLMRequest, LLMResponse, LLMImage, TokenUsage, TraceContext } from "./types";
@@ -73,6 +74,8 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
           return callOpenAI(req);
         case "google":
           return callGoogle(req);
+        case "grok":
+          return callGrok(req);
         default:
           throw new Error(`Unknown provider: ${req.provider}`);
       }

@@ -19,6 +19,7 @@ npm install
 ANTHROPIC_API_KEY=""
 OPENAI_API_KEY=""
 GOOGLE_API_KEY=""
+XAI_API_KEY=""
 
 # Langfuse observability (https://langfuse.com)
 LANGFUSE_PUBLIC_KEY=""

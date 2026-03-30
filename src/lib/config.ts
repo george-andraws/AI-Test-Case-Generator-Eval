@@ -1,4 +1,4 @@
-export type Provider = "anthropic" | "openai" | "google";
+export type Provider = "anthropic" | "openai" | "google" | "grok";
 
 export interface ModelConfig {
   id: string;
@@ -8,6 +8,7 @@ export interface ModelConfig {
   apiKeyEnvVar: string;
   maxTokens: number;
   temperature: number;
+  enabled: boolean;
 }
 
 export interface LangfuseConfig {
@@ -34,6 +35,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "ANTHROPIC_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
+      enabled: true,
     },
     {
       id: "gpt-4.1",
@@ -43,6 +45,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "OPENAI_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
+      enabled: true,
     },
     {
       id: "gemini-3.1-flash-lite-preview",
@@ -52,6 +55,17 @@ const config: AppConfig = {
       apiKeyEnvVar: "GOOGLE_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
+      enabled: true,
+    },
+    {
+      id: "grok",
+      name: "Grok 4.1-fast-reasoning",
+      provider: "grok",
+      model: "grok-4-1-fast-reasoning",
+      apiKeyEnvVar: "XAI_API_KEY",
+      maxTokens: 4096,
+      temperature: 0.3,
+      enabled: true,
     },
   ],
 
@@ -66,6 +80,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "ANTHROPIC_API_KEY",
       maxTokens: 8192,
       temperature: 0.2,
+      enabled: true,
     },
     {
       id: "gpt-4.1-judge",
@@ -75,6 +90,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "OPENAI_API_KEY",
       maxTokens: 8192,
       temperature: 0.2,
+      enabled: true,
     },
     {
       id: "gemini-3.1-flash-lite-preview-judge",
@@ -84,6 +100,17 @@ const config: AppConfig = {
       apiKeyEnvVar: "GOOGLE_API_KEY",
       maxTokens: 16384,
       temperature: 0.2,
+      enabled: true,
+    },
+    {
+      id: "grok-judge",
+      name: "Grok 3 (Judge)",
+      provider: "grok",
+      model: "grok-3",
+      apiKeyEnvVar: "XAI_API_KEY",
+      maxTokens: 2048,
+      temperature: 0.2,
+      enabled: true,
     },
   ],
 

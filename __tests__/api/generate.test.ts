@@ -18,6 +18,7 @@ jest.mock('../../src/lib/config', () => ({
         apiKeyEnvVar: 'ANTHROPIC_API_KEY',
         maxTokens: 4096,
         temperature: 0.3,
+        enabled: true,
       },
       {
         id: 'gpt',
@@ -27,6 +28,7 @@ jest.mock('../../src/lib/config', () => ({
         apiKeyEnvVar: 'OPENAI_API_KEY',
         maxTokens: 4096,
         temperature: 0.3,
+        enabled: true,
       },
     ],
     judges: [],

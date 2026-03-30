@@ -61,6 +61,21 @@ const requests: LLMRequest[] = [
       tags: ["smoke-test"],
     },
   },
+  {
+    provider: "grok",
+    model: "grok-4-1-fast-reasoning",
+    systemPrompt: SYSTEM_PROMPT,
+    userPrompt: USER_PROMPT,
+    maxTokens: 128,
+    temperature: 0.3,
+    traceContext: {
+      traceName: "smoke-test: grok",
+      role: "generator",
+      url: "http://localhost:3000",
+      revision: 1,
+      tags: ["smoke-test"],
+    },
+  },
 ];
 
 async function main() {
