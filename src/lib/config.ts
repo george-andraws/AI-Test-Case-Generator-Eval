@@ -58,6 +58,16 @@ const config: AppConfig = {
       temperature: 0.3,
       enabled: true,
     },
+    {
+      id: "xAI-grok",
+      name: "Grok 4.2 Reasoning",
+      provider: "grok",
+      model: "grok-4.20-0309-reasoning",
+      apiKeyEnvVar: "XAI_API_KEY",
+      maxTokens: 2048,
+      temperature: 0.2,
+      enabled: false,
+    },
 
     // ── OpenRouter — open source and additional models ─────────────────────
     {
