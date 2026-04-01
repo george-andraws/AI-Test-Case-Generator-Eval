@@ -472,6 +472,223 @@ export function printSummary(result: ExperimentResult): void {
   console.log("");
 }
 
+// ── Judge-only pipeline ────────────────────────────────────────────────────────
+
+/**
+ * Re-judges generator outputs from a source revision using the current judge
+ * configuration and judgePrompt. Skips generation entirely; copies generator
+ * outputs from the source revision into a new revision.
+ */
+export async function runJudgeOnly(
+  expConfig: ExperimentConfig,
+  sourceRevisionData: RevisionData
+): Promise<ExperimentResult> {
+  const { url, productRequirements, judgePrompt, revisionNotes, imagePaths } = expConfig;
+
+  const images: LLMImage[] = imagePaths?.length ? await loadImages(imagePaths) : [];
+  const hasImages = images.length > 0;
+
+  const sourceGenerators = sourceRevisionData.configSnapshot.generators;
+  const sourceGens = sourceRevisionData.generations;
+
+  // Build GenerationResult map from source revision data
+  const generations: Record<string, GenerationResult> = Object.fromEntries(
+    Object.entries(sourceGens).map(([id, g]) => [
+      id,
+      {
+        success: true,
+        output: g.output,
+        tokenUsage: g.tokenUsage,
+        latencyMs: g.latencyMs,
+        traceId: g.langfuseTraceId,
+      },
+    ])
+  );
+
+  console.log(
+    `\nUsing ${Object.keys(sourceGens).length} generator output(s) from revision ${sourceRevisionData.revision}…`
+  );
+  for (const gen of sourceGenerators) {
+    const r = generations[gen.id];
+    if (r?.success) {
+      console.log(`  ✓ ${gen.name} — ${r.output!.length} chars (copied)`);
+    }
+  }
+
+  // ── Phase 2: Save new revision ───────────────────────────────────────────────
+
+  const configSnapshot: ConfigSnapshot = {
+    generators: sourceGenerators,
+    judges: appConfig.judges.map((j) => ({
+      id: j.id,
+      name: j.name,
+      model: j.model,
+      provider: j.provider,
+    })),
+  };
+
+  const revisionNumber = await saveRevision({
+    url,
+    prompts: {
+      testMethodology: sourceRevisionData.prompts.testMethodology,
+      productRequirements,
+      judgePrompt,
+    },
+    revisionNotes,
+    images: [],
+    configSnapshot,
+    generations: sourceGens,
+    scores: {
+      human: Object.fromEntries(sourceGenerators.map((g) => [g.id, null])),
+      judges: {},
+    },
+  });
+
+  const slug = urlToSlug(url);
+  console.log(`\n  Revision ${revisionNumber} saved → data/${slug}.json`);
+
+  // ── Phase 3: Judge ───────────────────────────────────────────────────────────
+
+  const generatorsWithOutput = sourceGenerators.filter(
+    (g) => generations[g.id]?.success && generations[g.id]?.output
+  );
+
+  if (generatorsWithOutput.length === 0) {
+    console.log("\n  No successful generations to judge.\n");
+    return { revisionNumber, slug, url, generations, judgeScores: {} };
+  }
+
+  const totalJudgeCalls = appConfig.judges.length * generatorsWithOutput.length;
+  console.log(
+    `\nJudging with ${appConfig.judges.length} judge(s) × ${generatorsWithOutput.length} generation(s) = ${totalJudgeCalls} calls in parallel…`
+  );
+
+  type JudgeTask = { judgeId: string; generatorId: string; promise: Promise<JudgeScoreResult> };
+  const judgeTasks: JudgeTask[] = [];
+
+  for (const judge of appConfig.judges) {
+    for (const gen of generatorsWithOutput) {
+      const selfEvaluation = gen.provider === judge.provider && gen.model === judge.model;
+
+      const jUserPrompt = buildJudgeUserPrompt(
+        url,
+        productRequirements,
+        gen.name,
+        generations[gen.id].output!,
+        hasImages
+      );
+
+      const promise = callLLM({
+        provider: judge.provider,
+        model: judge.model,
+        systemPrompt: judgePrompt,
+        userPrompt: jUserPrompt,
+        maxTokens: judge.maxTokens,
+        temperature: judge.temperature,
+        images: hasImages ? images : undefined,
+        traceContext: {
+          traceName: `judge: ${judge.id} → ${gen.id}`,
+          role: "judge",
+          url,
+          tags: ["judge", judge.id, gen.id],
+        },
+      })
+        .then((res): JudgeScoreResult => {
+          const parsed = parseJudgeResponse(res.text);
+          if (parsed) {
+            return {
+              success: true,
+              score: parsed.score,
+              feedback: parsed.feedback,
+              selfEvaluation,
+              traceId: res.traceId,
+            };
+          }
+          return {
+            success: true,
+            score: undefined,
+            feedback: res.text,
+            selfEvaluation,
+            traceId: res.traceId,
+          };
+        })
+        .catch(
+          (err): JudgeScoreResult => ({
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        );
+
+      judgeTasks.push({ judgeId: judge.id, generatorId: gen.id, promise });
+    }
+  }
+
+  const judgeResults = await Promise.all(judgeTasks.map((t) => t.promise));
+
+  const judgeScores: Record<string, Record<string, JudgeScoreResult>> = {};
+  judgeResults.forEach((result, i) => {
+    const { judgeId, generatorId } = judgeTasks[i];
+    if (!judgeScores[judgeId]) judgeScores[judgeId] = {};
+    judgeScores[judgeId][generatorId] = result;
+  });
+
+  for (const judge of appConfig.judges) {
+    for (const gen of generatorsWithOutput) {
+      const r = judgeScores[judge.id]?.[gen.id];
+      if (!r) continue;
+      const selfMark = r.selfEvaluation ? " [self]" : "";
+      if (r.success) {
+        const scoreStr = r.score !== undefined ? `score=${r.score}` : "score=? (parse failed)";
+        console.log(`  ✓ ${judge.name} → ${gen.name} — ${scoreStr}${selfMark}`);
+      } else {
+        console.log(`  ✗ ${judge.name} → ${gen.name} — FAILED: ${r.error}`);
+      }
+    }
+  }
+
+  // ── Phase 4: Patch judge scores into revision ────────────────────────────────
+
+  const judgeScoresPatch: RevisionData["scores"]["judges"] = {};
+  for (const [judgeId, genMap] of Object.entries(judgeScores)) {
+    for (const [genId, r] of Object.entries(genMap)) {
+      if (r.success && r.score !== undefined && r.traceId) {
+        if (!judgeScoresPatch[judgeId]) judgeScoresPatch[judgeId] = {};
+        judgeScoresPatch[judgeId][genId] = {
+          score: r.score,
+          feedback: r.feedback ?? "",
+          langfuseTraceId: r.traceId,
+        };
+      }
+    }
+  }
+
+  if (Object.keys(judgeScoresPatch).length > 0) {
+    await updateRevision(slug, revisionNumber, { scores: { judges: judgeScoresPatch } });
+  }
+
+  // ── Phase 5: Send judge scores to Langfuse ───────────────────────────────────
+
+  const scoreCalls: Promise<unknown>[] = [];
+  for (const [judgeId, genMap] of Object.entries(judgeScores)) {
+    for (const [genId, r] of Object.entries(genMap)) {
+      if (r.success && r.score !== undefined && r.traceId) {
+        scoreCalls.push(
+          scoreTrace({
+            traceId: r.traceId,
+            name: `judge-score:${judgeId}→${genId}`,
+            value: r.score,
+            comment: r.feedback,
+            source: "llm_judge",
+          })
+        );
+      }
+    }
+  }
+  await Promise.allSettled(scoreCalls);
+
+  return { revisionNumber, slug, url, generations, judgeScores };
+}
+
 // ── CLI entry point ────────────────────────────────────────────────────────────
 
 async function main() {

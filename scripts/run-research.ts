@@ -20,7 +20,8 @@ import path from "path";
 
 import appConfig from "../src/lib/config";
 import { initTracing, flushTracing } from "../src/lib/llm";
-import { runExperiment, printSummary } from "./run-experiment";
+import { readRevision, urlToSlug } from "../src/lib/storage";
+import { runExperiment, runJudgeOnly, printSummary } from "./run-experiment";
 import type { ExperimentConfig, ExperimentResult } from "./run-experiment";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -166,11 +167,28 @@ export async function runResearch(protocol: ResearchProtocol): Promise<Variation
 // ── CLI entry point ────────────────────────────────────────────────────────────
 
 async function main() {
-  const protocolPath = process.argv[2];
+  const args = process.argv.slice(2);
+
+  // Support both positional ("npm run research <path>") and
+  // named-flag ("npm run research -- --config <path> [--judge-only --source-revision N]") syntax.
+  const configFlagIdx = args.indexOf("--config");
+  const judgeOnly = args.includes("--judge-only");
+  const sourceRevFlagIdx = args.indexOf("--source-revision");
+
+  const protocolPath = configFlagIdx !== -1 ? args[configFlagIdx + 1] : args[0];
+
   if (!protocolPath) {
     console.error("Usage: npm run research <path-to-research.json>");
     process.exit(1);
   }
+
+  if (judgeOnly && sourceRevFlagIdx === -1) {
+    console.error("Error: --judge-only requires --source-revision <number>");
+    process.exit(1);
+  }
+
+  const sourceRevision =
+    sourceRevFlagIdx !== -1 ? parseInt(args[sourceRevFlagIdx + 1], 10) : undefined;
 
   initTracing();
 
@@ -183,12 +201,39 @@ async function main() {
     process.exit(1);
   }
 
-  if (!protocol.variations?.length) {
-    console.error("Research protocol must have at least one variation.");
-    process.exit(1);
-  }
+  if (judgeOnly) {
+    const slug = urlToSlug(protocol.url);
+    const sourceRevisionData = await readRevision(slug, sourceRevision!);
 
-  await runResearch(protocol);
+    if (!sourceRevisionData) {
+      console.error(`Error: Revision ${sourceRevision} not found for URL ${protocol.url}`);
+      process.exit(1);
+    }
+
+    if (Object.keys(sourceRevisionData.generations).length === 0) {
+      console.error(`Error: Revision ${sourceRevision} has no generator outputs`);
+      process.exit(1);
+    }
+
+    const expConfig: ExperimentConfig = {
+      url: protocol.url,
+      productRequirements: protocol.productRequirements,
+      judgePrompt: protocol.judgePrompt,
+      testMethodology: sourceRevisionData.prompts.testMethodology,
+      revisionNotes: `Re-judge of revision ${sourceRevision} with updated judge configuration`,
+      imagePaths: protocol.imagePaths,
+    };
+
+    const result = await runJudgeOnly(expConfig, sourceRevisionData);
+    printSummary(result);
+  } else {
+    if (!protocol.variations?.length) {
+      console.error("Research protocol must have at least one variation.");
+      process.exit(1);
+    }
+
+    await runResearch(protocol);
+  }
 
   process.stdout.write("Flushing traces to Langfuse… ");
   await flushTracing();

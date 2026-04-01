@@ -74,8 +74,9 @@ jest.mock('../../src/lib/storage', () => ({
   updateRevision: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { runExperiment } from '../../scripts/run-experiment';
+import { runExperiment, runJudgeOnly } from '../../scripts/run-experiment';
 import type { ExperimentConfig } from '../../scripts/run-experiment';
+import type { RevisionData } from '../../src/lib/storage';
 import { callLLM, scoreTrace } from '../../src/lib/llm';
 import { saveRevision, updateRevision } from '../../src/lib/storage';
 
@@ -513,5 +514,165 @@ describe('image handling', () => {
     const genCall = mockCallLLM.mock.calls[0][0];
     expect(genCall.images[0].mimeType).toBe('image/jpeg');
     expect(genCall.images[1].mimeType).toBe('image/webp');
+  });
+});
+
+// ── runJudgeOnly ───────────────────────────────────────────────────────────────
+
+const sourceRevision: RevisionData = {
+  revision: 5,
+  timestamp: '2025-01-01T00:00:00.000Z',
+  url: 'http://test.example.com',
+  prompts: {
+    testMethodology: 'Original methodology',
+    productRequirements: 'A simple task management app.',
+    judgePrompt: 'Old judge prompt',
+  },
+  revisionNotes: 'Original run',
+  images: [],
+  configSnapshot: {
+    generators: [
+      { id: 'claude', name: 'Claude Sonnet', provider: 'anthropic', model: 'claude-sonnet' },
+      { id: 'gpt',    name: 'GPT-4',         provider: 'openai',    model: 'gpt-4'         },
+    ],
+    judges: [
+      { id: 'old-judge', name: 'Old Judge', provider: 'anthropic', model: 'old-model' },
+    ],
+  },
+  generations: {
+    claude: {
+      output: 'Claude test cases output',
+      tokenUsage: { input: 100, output: 200 },
+      latencyMs: 1500,
+      langfuseTraceId: 'orig-trace-claude',
+    },
+    gpt: {
+      output: 'GPT test cases output',
+      tokenUsage: { input: 80, output: 180 },
+      latencyMs: 1200,
+      langfuseTraceId: 'orig-trace-gpt',
+    },
+  },
+  scores: {
+    human: { claude: null, gpt: null },
+    judges: {},
+  },
+};
+
+const judgeOnlyConfig: ExperimentConfig = {
+  url: 'http://test.example.com',
+  testMethodology: 'Original methodology',
+  productRequirements: 'A simple task management app.',
+  judgePrompt: 'New improved judge prompt',
+  revisionNotes: 'Re-judge of revision 5 with updated judge configuration',
+};
+
+describe('runJudgeOnly', () => {
+  beforeEach(() => {
+    // Only judge calls — 2 generators × 2 judges = 4 calls
+    mockCallLLM
+      .mockResolvedValueOnce(judgeResponse('j-claude-claude'))
+      .mockResolvedValueOnce(judgeResponse('j-claude-gpt'))
+      .mockResolvedValueOnce(judgeResponse('j-gpt-claude'))
+      .mockResolvedValueOnce(judgeResponse('j-gpt-gpt'));
+    mockSaveRevision.mockResolvedValue(6);
+    mockUpdateRevision.mockResolvedValue(undefined);
+    mockScoreTrace.mockResolvedValue(undefined);
+  });
+
+  test('does NOT call callLLM for generation — only judge calls', async () => {
+    await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    // 2 generators × 2 judges = 4 calls (no gen calls)
+    expect(mockCallLLM).toHaveBeenCalledTimes(4);
+    const roles = mockCallLLM.mock.calls.map((c: any[]) => c[0].traceContext?.role);
+    expect(roles.every((r: string) => r === 'judge')).toBe(true);
+  });
+
+  test('saveRevision called with generator outputs copied from source revision', async () => {
+    await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    const { generations } = mockSaveRevision.mock.calls[0][0];
+    expect(generations).toEqual(sourceRevision.generations);
+  });
+
+  test('saveRevision called with judgePrompt from expConfig (not source revision)', async () => {
+    await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    const { prompts } = mockSaveRevision.mock.calls[0][0];
+    expect(prompts.judgePrompt).toBe('New improved judge prompt');
+  });
+
+  test('saveRevision called with revisionNotes from expConfig', async () => {
+    await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    expect(mockSaveRevision).toHaveBeenCalledWith(
+      expect.objectContaining({ revisionNotes: judgeOnlyConfig.revisionNotes })
+    );
+  });
+
+  test('configSnapshot uses source generators and current config judges', async () => {
+    await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    const { configSnapshot } = mockSaveRevision.mock.calls[0][0];
+    // Generators from source revision
+    expect(configSnapshot.generators).toEqual(sourceRevision.configSnapshot.generators);
+    // Judges from current appConfig (claude-judge and gpt-judge)
+    expect(configSnapshot.judges).toHaveLength(2);
+    expect(configSnapshot.judges[0].id).toBe('claude-judge');
+  });
+
+  test('judge userPrompt uses the new judgePrompt as systemPrompt', async () => {
+    await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    for (const call of mockCallLLM.mock.calls) {
+      expect(call[0].systemPrompt).toBe('New improved judge prompt');
+    }
+  });
+
+  test('judge userPrompt contains source generation output', async () => {
+    await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    const allUserPrompts = mockCallLLM.mock.calls.map((c: any[]) => c[0].userPrompt);
+    expect(allUserPrompts.some((p: string) => p.includes('Claude test cases output'))).toBe(true);
+    expect(allUserPrompts.some((p: string) => p.includes('GPT test cases output'))).toBe(true);
+  });
+
+  test('self-evaluation detected using source revision generator provider/model', async () => {
+    // claude generator: anthropic/claude-sonnet; claude-judge: anthropic/claude-sonnet → self-eval
+    const result = await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    expect(result.judgeScores['claude-judge']['claude'].selfEvaluation).toBe(true);
+  });
+
+  test('returns revisionNumber from saveRevision', async () => {
+    mockSaveRevision.mockResolvedValue(6);
+    const result = await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    expect(result.revisionNumber).toBe(6);
+  });
+
+  test('returns generations keyed by source generator IDs', async () => {
+    const result = await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    expect(result.generations['claude'].success).toBe(true);
+    expect(result.generations['claude'].output).toBe('Claude test cases output');
+    expect(result.generations['gpt'].success).toBe(true);
+  });
+
+  test('updateRevision called with new judge scores', async () => {
+    await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    expect(mockUpdateRevision).toHaveBeenCalledTimes(1);
+    expect(mockUpdateRevision).toHaveBeenCalledWith(
+      'test-example-com',
+      6,
+      expect.objectContaining({ scores: expect.objectContaining({ judges: expect.any(Object) }) })
+    );
+  });
+
+  test('scoreTrace called for each successful judge score', async () => {
+    await runJudgeOnly(judgeOnlyConfig, sourceRevision);
+    expect(mockScoreTrace).toHaveBeenCalledTimes(4);
+  });
+
+  test('returns empty judgeScores when source revision has no outputs', async () => {
+    const emptySource: RevisionData = {
+      ...sourceRevision,
+      generations: {},
+      scores: { human: {}, judges: {} },
+    };
+    const result = await runJudgeOnly(judgeOnlyConfig, emptySource);
+    expect(result.judgeScores).toEqual({});
+    expect(mockCallLLM).not.toHaveBeenCalled();
   });
 });

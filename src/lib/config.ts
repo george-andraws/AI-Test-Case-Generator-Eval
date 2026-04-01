@@ -36,7 +36,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "ANTHROPIC_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
-      enabled: true,
+      enabled: false,
     },
     {
       id: "gpt-4.1",
@@ -113,7 +113,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "ANTHROPIC_API_KEY",
       maxTokens: 8192,
       temperature: 0.2,
-      enabled: true,
+      enabled: false,
     },
     {
       id: "gpt-4.1-judge",
