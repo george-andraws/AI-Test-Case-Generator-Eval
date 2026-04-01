@@ -186,6 +186,31 @@ Each variation inherits `url`, `productRequirements`, `judgePrompt`, and `imageP
 
 All results are saved to `data/` as regular revisions and are visible in the UI history under their product URL.
 
+### Re-judging existing outputs
+
+Re-judge previously generated test cases with a different judge configuration using `--judge-only`. Useful for comparing how different judge prompts score the same generator output without paying to re-run generation.
+
+```bash
+npm run research -- --config research/config.json --judge-only --source-revision <number>
+```
+
+- `--judge-only` — skip all generator API calls; only run judge models against existing outputs.
+- `--source-revision <number>` — required with `--judge-only`. The revision number containing the generator outputs to re-judge.
+
+The runner loads the specified revision's generator outputs, runs all judge models from the current config using the current `judgePrompt`, and saves results as a new revision. Revision notes are auto-populated as `"Re-judge of revision N with updated judge configuration"`.
+
+**Example — comparing judge rubrics:**
+
+```bash
+# 1. Run generators + judges with a detailed rubric (produces revision 1)
+npm run research -- --config research/phase1.json
+
+# 2. Re-judge the same outputs with a simpler judge prompt (produces revision 2)
+npm run research -- --config research/phase2.json --judge-only --source-revision 1
+```
+
+Both revisions appear in the UI under the same product URL, so you can compare judge scores side-by-side in Scoring Trends.
+
 ---
 
 ## Running tests
