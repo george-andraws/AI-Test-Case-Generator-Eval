@@ -80,7 +80,7 @@ jest.mock('../../src/lib/storage', () => ({
   updateRevision: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { runExperiment, runJudgeOnly, resolvePrompt } from '../../scripts/run-experiment';
+import { runExperiment, runJudgeOnly, resolvePrompt, promptDesc, printDryRunExperiment } from '../../scripts/run-experiment';
 import type { ExperimentConfig } from '../../scripts/run-experiment';
 import type { RevisionData } from '../../src/lib/storage';
 import { callLLM, scoreTrace } from '../../src/lib/llm';
@@ -743,5 +743,111 @@ describe('resolvePrompt', () => {
   test('inline string starting with "file" but not "file:" is returned as-is', () => {
     expect(resolvePrompt('files are good')).toBe('files are good');
     expect(mockExistsSync).not.toHaveBeenCalled();
+  });
+});
+
+// ── promptDesc ─────────────────────────────────────────────────────────────────
+
+describe('promptDesc', () => {
+  test('file: prefix formats as "loaded from <path> (N chars)"', () => {
+    expect(promptDesc('file:research/prompts/foo.md', 'hello world')).toBe(
+      'loaded from research/prompts/foo.md (11 chars)'
+    );
+  });
+
+  test('inline string formats as "inline (N chars)"', () => {
+    expect(promptDesc('plain text prompt', 'plain text prompt')).toBe(
+      'inline (17 chars)'
+    );
+  });
+
+  test('char count reflects resolved content length, not original', () => {
+    expect(promptDesc('file:any.md', 'abc')).toBe('loaded from any.md (3 chars)');
+  });
+
+  test('empty inline string', () => {
+    expect(promptDesc('', '')).toBe('inline (0 chars)');
+  });
+});
+
+// ── printDryRunExperiment ──────────────────────────────────────────────────────
+
+describe('printDryRunExperiment', () => {
+  let logs: string[];
+
+  beforeEach(() => {
+    logs = [];
+    jest.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  const original: ExperimentConfig = {
+    url: 'http://example.com',
+    testMethodology: 'file:prompts/methodology.md',
+    productRequirements: 'inline requirements text',
+    judgePrompt: 'file:prompts/judge.md',
+    revisionNotes: 'test run',
+  };
+
+  const resolved: ExperimentConfig = {
+    ...original,
+    testMethodology: 'x'.repeat(50),  // 50 chars
+    judgePrompt: 'y'.repeat(30),       // 30 chars
+  };
+
+  test('prints dry-run header', () => {
+    printDryRunExperiment(original, resolved);
+    expect(logs).toEqual(expect.arrayContaining([
+      expect.stringContaining('DRY RUN — no API calls will be made'),
+    ]));
+  });
+
+  test('prints URL', () => {
+    printDryRunExperiment(original, resolved);
+    expect(logs.some((l) => l.includes('http://example.com'))).toBe(true);
+  });
+
+  test('prints file: fields as "loaded from <path> (N chars)"', () => {
+    printDryRunExperiment(original, resolved);
+    expect(logs.some((l) => l.includes('loaded from prompts/methodology.md (50 chars)'))).toBe(true);
+    expect(logs.some((l) => l.includes('loaded from prompts/judge.md (30 chars)'))).toBe(true);
+  });
+
+  test('prints inline field as "inline (N chars)"', () => {
+    printDryRunExperiment(original, resolved);
+    const reqLen = original.productRequirements.length;
+    expect(logs.some((l) => l.includes(`inline (${reqLen} chars)`))).toBe(true);
+  });
+
+  test('prints all generator model names', () => {
+    printDryRunExperiment(original, resolved);
+    expect(logs.some((l) => l.includes('Claude Sonnet'))).toBe(true);
+    expect(logs.some((l) => l.includes('GPT-4'))).toBe(true);
+  });
+
+  test('prints all judge model names', () => {
+    printDryRunExperiment(original, resolved);
+    expect(logs.some((l) => l.includes('Claude Judge'))).toBe(true);
+    expect(logs.some((l) => l.includes('GPT Judge'))).toBe(true);
+  });
+
+  test('prints correct generator call count (2)', () => {
+    printDryRunExperiment(original, resolved);
+    expect(logs.some((l) => l.includes('Generator calls') && l.includes('2'))).toBe(true);
+  });
+
+  test('prints correct judge evaluation count (2 outputs × 2 judges = 4)', () => {
+    printDryRunExperiment(original, resolved);
+    expect(logs.some((l) => l.includes('2 outputs') && l.includes('2 judges') && l.includes('4'))).toBe(true);
+  });
+
+  test('prints correct total API calls (2 gen + 4 judge = 6)', () => {
+    printDryRunExperiment(original, resolved);
+    expect(logs.some((l) => l.includes('Total:') && l.includes('6'))).toBe(true);
   });
 });

@@ -1,0 +1,23 @@
+{
+  "url": "https://www.globalmart.example.com",
+  "productRequirements": "file:research/prompts/shopping-cart-requirements.md",
+  "judgePrompt": "file:research/prompts/judge-rubric-vB-comprehensive.md",
+  "variations": [
+    {
+      "name": "M1-baseline",
+      "testMethodology": "file:research/prompts/test-methodology-v1-baseline.md"
+    },
+    {
+      "name": "M2-structure-only",
+      "testMethodology": "file:research/prompts/test-methodology-v2-structure.md"
+    },
+    {
+      "name": "M3-techniques-coverage",
+      "testMethodology": "file:research/prompts/test-methodology-v3-techniques.md"
+    },
+    {
+      "name": "M4-comprehensive",
+      "testMethodology": "file:research/prompts/test-methodology-v4-comprehensive.md"
+    }
+  ]
+}

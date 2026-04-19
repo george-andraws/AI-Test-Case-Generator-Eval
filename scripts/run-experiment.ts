@@ -705,35 +705,80 @@ export async function runJudgeOnly(
 
 // ── CLI entry point ────────────────────────────────────────────────────────────
 
+export function promptDesc(original: string, resolved: string): string {
+  return original.startsWith("file:")
+    ? `loaded from ${original.slice(5)} (${resolved.length} chars)`
+    : `inline (${resolved.length} chars)`;
+}
+
+export function printDryRunExperiment(
+  original: ExperimentConfig,
+  resolved: ExperimentConfig
+): void {
+  const W = 62;
+  const line = "─".repeat(W);
+  console.log(`\n${line}`);
+  console.log("DRY RUN — no API calls will be made");
+  console.log(line);
+  console.log(`URL:                  ${resolved.url}`);
+  console.log(`Methodology:          ${promptDesc(original.testMethodology, resolved.testMethodology)}`);
+  console.log(`Product Requirements: ${promptDesc(original.productRequirements, resolved.productRequirements)}`);
+  console.log(`Judge Prompt:         ${promptDesc(original.judgePrompt, resolved.judgePrompt)}`);
+
+  console.log(`\nGenerator Models (${appConfig.generators.length}):`);
+  for (const g of appConfig.generators) console.log(`  • ${g.name}`);
+
+  console.log(`\nJudge Models (${appConfig.judges.length}):`);
+  for (const j of appConfig.judges) console.log(`  • ${j.name}`);
+
+  const genCalls = appConfig.generators.length;
+  const judgeCalls = genCalls * appConfig.judges.length;
+  console.log("\nAPI calls:");
+  console.log(`  Generator calls:   ${genCalls}`);
+  console.log(`  Judge evaluations: ${genCalls} outputs × ${appConfig.judges.length} judges = ${judgeCalls}`);
+  console.log(`  Total:             ${genCalls + judgeCalls}`);
+  console.log("");
+}
+
 async function main() {
-  const configPath = process.argv[2];
+  const args = process.argv.slice(2);
+  const dryRun = args.includes("--dry-run");
+  const configPath = args.find((a) => !a.startsWith("--"));
+
   if (!configPath) {
-    console.error("Usage: npm run experiment <path-to-experiment.json>");
+    console.error("Usage: npm run experiment <path-to-experiment.json> [--dry-run]");
     process.exit(1);
   }
 
-  initTracing();
+  if (!dryRun) initTracing();
 
-  let expConfig: ExperimentConfig;
+  let rawConfig: ExperimentConfig;
   try {
     const raw = await fs.readFile(path.resolve(configPath), "utf-8");
-    expConfig = JSON.parse(raw) as ExperimentConfig;
+    rawConfig = JSON.parse(raw) as ExperimentConfig;
   } catch (err) {
     console.error(`Failed to load experiment config: ${err instanceof Error ? err.message : err}`);
     process.exit(1);
   }
 
+  const originalConfig = { ...rawConfig };
+
   try {
-    expConfig.testMethodology = resolvePrompt(expConfig.testMethodology);
-    expConfig.productRequirements = resolvePrompt(expConfig.productRequirements);
-    expConfig.judgePrompt = resolvePrompt(expConfig.judgePrompt);
+    rawConfig.testMethodology = resolvePrompt(rawConfig.testMethodology);
+    rawConfig.productRequirements = resolvePrompt(rawConfig.productRequirements);
+    rawConfig.judgePrompt = resolvePrompt(rawConfig.judgePrompt);
   } catch (err) {
     console.error(`Failed to load prompt file: ${err instanceof Error ? err.message : err}`);
     process.exit(1);
   }
 
+  if (dryRun) {
+    printDryRunExperiment(originalConfig, rawConfig);
+    process.exit(0);
+  }
+
   try {
-    const result = await runExperiment(expConfig);
+    const result = await runExperiment(rawConfig);
     printSummary(result);
   } catch (err) {
     console.error(`Experiment failed: ${err instanceof Error ? err.message : err}`);

@@ -133,6 +133,14 @@ Runs all generators in parallel, saves the revision to `data/`, runs all judges 
 npm run experiment experiments/example.json
 ```
 
+Add `--dry-run` to validate the config and preview what would run without making any API calls:
+
+```bash
+npm run experiment experiments/example.json --dry-run
+```
+
+Dry-run resolves all `file:` prompt references, reports character counts and sources for each prompt field, lists the enabled generator and judge models, and prints the total number of API calls that would be made. Exits with code 0 on success or a clear error if a referenced file is missing.
+
 **Experiment config shape** (`experiments/example.json`):
 
 ```json
@@ -159,6 +167,14 @@ Runs a list of methodology variations sequentially against the same product requ
 ```bash
 npm run research research/example.json
 ```
+
+Add `--dry-run` to validate the protocol and preview the full run plan without making any API calls:
+
+```bash
+npm run research research/example.json --dry-run
+```
+
+Dry-run resolves all `file:` prompt references, reports character counts and sources for each prompt field, shows a per-variation breakdown with a 200-character methodology preview, lists the enabled generator and judge models, and prints the full API call breakdown (generator runs + judge evaluations = total). Exits with code 0 on success or a clear error if a referenced file is missing.
 
 **Research protocol shape** (`research/example.json`):
 
@@ -219,7 +235,7 @@ Both revisions appear in the UI under the same product URL, so you can compare j
 npm test
 ```
 
-138 tests across 12 suites covering: storage, LLM routing, API routes (generate, judge, data, upload, products), config validation, judge response parsing, self-evaluation detection, prompt assembly, and the copy-button UI component.
+284 tests across 16 suites covering: storage, LLM routing, API routes (generate, judge, data, upload, products), config validation, judge response parsing, self-evaluation detection, prompt assembly, CLI runners (experiment, research), and the copy-button UI component.
 
 ---
 

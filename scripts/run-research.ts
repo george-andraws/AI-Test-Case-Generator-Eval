@@ -166,6 +166,55 @@ export async function runResearch(protocol: ResearchProtocol): Promise<Variation
 
 // ── CLI entry point ────────────────────────────────────────────────────────────
 
+function promptDesc(original: string, resolved: string): string {
+  return original.startsWith("file:")
+    ? `loaded from ${original.slice(5)} (${resolved.length} chars)`
+    : `inline (${resolved.length} chars)`;
+}
+
+export function printDryRunResearch(
+  originalProtocol: ResearchProtocol,
+  resolvedProtocol: ResearchProtocol
+): void {
+  const W = 62;
+  const line = "─".repeat(W);
+  console.log(`\n${line}`);
+  console.log("DRY RUN — no API calls will be made");
+  console.log(line);
+  console.log(`URL: ${resolvedProtocol.url}`);
+  console.log(`Product Requirements: ${promptDesc(originalProtocol.productRequirements, resolvedProtocol.productRequirements)}`);
+  console.log(`Judge Prompt:         ${promptDesc(originalProtocol.judgePrompt, resolvedProtocol.judgePrompt)}`);
+
+  console.log(`\nGenerator Models (${appConfig.generators.length}):`);
+  for (const g of appConfig.generators) console.log(`  • ${g.name}`);
+
+  console.log(`\nJudge Models (${appConfig.judges.length}):`);
+  for (const j of appConfig.judges) console.log(`  • ${j.name}`);
+
+  console.log(`\nVariations (${resolvedProtocol.variations.length}):`);
+  for (let i = 0; i < resolvedProtocol.variations.length; i++) {
+    const orig = originalProtocol.variations[i];
+    const resolved = resolvedProtocol.variations[i];
+    console.log(`\n  [${i + 1}] ${resolved.name}`);
+    console.log(`      Methodology: ${promptDesc(orig.testMethodology, resolved.testMethodology)}`);
+    const preview = resolved.testMethodology.slice(0, 200).replace(/\n/g, " ");
+    const ellipsis = resolved.testMethodology.length > 200 ? "…" : "";
+    console.log(`      Preview: "${preview}${ellipsis}"`);
+  }
+
+  const N = resolvedProtocol.variations.length;
+  const M = appConfig.generators.length;
+  const J = appConfig.judges.length;
+  const genRuns = N * M;
+  const judgeEvals = genRuns * J;
+  console.log("\nSummary:");
+  console.log(`  Total variations:   ${N}`);
+  console.log(`  Generator runs:     ${N} variations × ${M} models = ${genRuns}`);
+  console.log(`  Judge evaluations:  ${genRuns} generator outputs × ${J} judge models = ${judgeEvals}`);
+  console.log(`  Total API calls:    ${genRuns + judgeEvals}`);
+  console.log("");
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -173,12 +222,14 @@ async function main() {
   // named-flag ("npm run research -- --config <path> [--judge-only --source-revision N]") syntax.
   const configFlagIdx = args.indexOf("--config");
   const judgeOnly = args.includes("--judge-only");
+  const dryRun = args.includes("--dry-run");
   const sourceRevFlagIdx = args.indexOf("--source-revision");
 
-  const protocolPath = configFlagIdx !== -1 ? args[configFlagIdx + 1] : args[0];
+  const protocolPath =
+    configFlagIdx !== -1 ? args[configFlagIdx + 1] : args.find((a) => !a.startsWith("--"));
 
   if (!protocolPath) {
-    console.error("Usage: npm run research <path-to-research.json>");
+    console.error("Usage: npm run research <path-to-research.json> [--dry-run]");
     process.exit(1);
   }
 
@@ -190,7 +241,7 @@ async function main() {
   const sourceRevision =
     sourceRevFlagIdx !== -1 ? parseInt(args[sourceRevFlagIdx + 1], 10) : undefined;
 
-  initTracing();
+  if (!dryRun) initTracing();
 
   let protocol: ResearchProtocol;
   try {
@@ -201,6 +252,11 @@ async function main() {
     process.exit(1);
   }
 
+  const originalProtocol: ResearchProtocol = {
+    ...protocol,
+    variations: protocol.variations.map((v) => ({ ...v })),
+  };
+
   try {
     protocol.productRequirements = resolvePrompt(protocol.productRequirements);
     protocol.judgePrompt = resolvePrompt(protocol.judgePrompt);
@@ -210,6 +266,11 @@ async function main() {
   } catch (err) {
     console.error(`Failed to load prompt file: ${err instanceof Error ? err.message : err}`);
     process.exit(1);
+  }
+
+  if (dryRun) {
+    printDryRunResearch(originalProtocol, protocol);
+    process.exit(0);
   }
 
   if (judgeOnly) {

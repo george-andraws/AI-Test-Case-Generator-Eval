@@ -1,0 +1,11 @@
+{
+  "url": "https://www.globalmart.example.com",
+  "baseRequirements": "file:research/prompts/shopping-cart-requirements.md",
+  "judgePrompt": "file:research/prompts/judge-rubric-vA-none.md",
+  "variations": [
+    {
+      "name": "M4-comprehensive-no-rubric",
+      "methodology": "file:research/prompts/test-methodology-v4-comprehensive.md"
+    }
+  ]
+}
