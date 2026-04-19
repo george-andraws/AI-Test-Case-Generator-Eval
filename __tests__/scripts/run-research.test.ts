@@ -2,7 +2,9 @@ jest.mock('dotenv', () => ({ config: jest.fn() }));
 
 jest.mock('../../scripts/run-experiment', () => ({
   runExperiment: jest.fn(),
+  runJudgeOnly: jest.fn(),
   printSummary: jest.fn(),
+  resolvePrompt: jest.fn((v: string) => v),
 }));
 
 jest.mock('../../src/lib/llm', () => ({

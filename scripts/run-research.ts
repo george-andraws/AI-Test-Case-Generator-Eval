@@ -21,7 +21,7 @@ import path from "path";
 import appConfig from "../src/lib/config";
 import { initTracing, flushTracing } from "../src/lib/llm";
 import { readRevision, urlToSlug } from "../src/lib/storage";
-import { runExperiment, runJudgeOnly, printSummary } from "./run-experiment";
+import { runExperiment, runJudgeOnly, printSummary, resolvePrompt } from "./run-experiment";
 import type { ExperimentConfig, ExperimentResult } from "./run-experiment";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -198,6 +198,17 @@ async function main() {
     protocol = JSON.parse(raw) as ResearchProtocol;
   } catch (err) {
     console.error(`Failed to load research protocol: ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
+  }
+
+  try {
+    protocol.productRequirements = resolvePrompt(protocol.productRequirements);
+    protocol.judgePrompt = resolvePrompt(protocol.judgePrompt);
+    for (const v of protocol.variations) {
+      v.testMethodology = resolvePrompt(v.testMethodology);
+    }
+  } catch (err) {
+    console.error(`Failed to load prompt file: ${err instanceof Error ? err.message : err}`);
     process.exit(1);
   }
 

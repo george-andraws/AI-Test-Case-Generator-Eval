@@ -6,6 +6,12 @@ jest.mock('fs/promises', () => ({
   readFile: jest.fn(),
 }));
 
+// Mock sync fs for resolvePrompt tests
+jest.mock('fs', () => ({
+  existsSync: jest.fn(),
+  readFileSync: jest.fn(),
+}));
+
 jest.mock('../../src/lib/config', () => ({
   __esModule: true,
   default: {
@@ -74,7 +80,7 @@ jest.mock('../../src/lib/storage', () => ({
   updateRevision: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { runExperiment, runJudgeOnly } from '../../scripts/run-experiment';
+import { runExperiment, runJudgeOnly, resolvePrompt } from '../../scripts/run-experiment';
 import type { ExperimentConfig } from '../../scripts/run-experiment';
 import type { RevisionData } from '../../src/lib/storage';
 import { callLLM, scoreTrace } from '../../src/lib/llm';
@@ -674,5 +680,68 @@ describe('runJudgeOnly', () => {
     const result = await runJudgeOnly(judgeOnlyConfig, emptySource);
     expect(result.judgeScores).toEqual({});
     expect(mockCallLLM).not.toHaveBeenCalled();
+  });
+});
+
+// ── resolvePrompt ──────────────────────────────────────────────────────────────
+
+import { existsSync, readFileSync } from 'fs';
+
+const mockExistsSync = existsSync as jest.Mock;
+const mockReadFileSync = readFileSync as jest.Mock;
+
+describe('resolvePrompt', () => {
+  test('returns inline string unchanged', () => {
+    expect(resolvePrompt('just a plain prompt')).toBe('just a plain prompt');
+  });
+
+  test('returns empty string unchanged', () => {
+    expect(resolvePrompt('')).toBe('');
+  });
+
+  test('reads file contents when value starts with "file:"', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue('file contents here');
+
+    const result = resolvePrompt('file:research/prompts/methodology.md');
+    expect(result).toBe('file contents here');
+  });
+
+  test('calls readFileSync with utf-8 encoding', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue('content');
+
+    resolvePrompt('file:some/path.md');
+    expect(mockReadFileSync).toHaveBeenCalledWith(expect.any(String), 'utf-8');
+  });
+
+  test('resolves file path relative to process.cwd()', () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue('content');
+
+    resolvePrompt('file:research/prompts/test.md');
+    const resolvedPath = mockReadFileSync.mock.calls[0][0] as string;
+    expect(resolvedPath).toContain('research/prompts/test.md');
+    expect(resolvedPath.startsWith('/')).toBe(true);
+  });
+
+  test('throws with full resolved path when file does not exist', () => {
+    mockExistsSync.mockReturnValue(false);
+
+    expect(() => resolvePrompt('file:missing/file.md')).toThrow(
+      /Prompt file not found:.*missing\/file\.md/
+    );
+  });
+
+  test('does not call readFileSync when file does not exist', () => {
+    mockExistsSync.mockReturnValue(false);
+
+    try { resolvePrompt('file:nope.md'); } catch { /* expected */ }
+    expect(mockReadFileSync).not.toHaveBeenCalled();
+  });
+
+  test('inline string starting with "file" but not "file:" is returned as-is', () => {
+    expect(resolvePrompt('files are good')).toBe('files are good');
+    expect(mockExistsSync).not.toHaveBeenCalled();
   });
 });

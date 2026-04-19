@@ -11,6 +11,7 @@ import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
 
 import fs from "fs/promises";
+import { existsSync, readFileSync } from "fs";
 import path from "path";
 
 import appConfig from "../src/lib/config";
@@ -60,6 +61,19 @@ export interface ExperimentResult {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+export function resolvePrompt(value: string): string {
+  if (value.startsWith("file:")) {
+    const filePath = value.slice(5);
+    const resolved = path.resolve(process.cwd(), filePath);
+    if (!existsSync(resolved)) {
+      throw new Error(`Prompt file not found: ${resolved}`);
+    }
+    console.log(`Loaded prompt from: ${filePath}`);
+    return readFileSync(resolved, "utf-8");
+  }
+  return value;
+}
 
 function mimeType(filePath: string): string {
   switch (path.extname(filePath).toLowerCase()) {
@@ -706,6 +720,15 @@ async function main() {
     expConfig = JSON.parse(raw) as ExperimentConfig;
   } catch (err) {
     console.error(`Failed to load experiment config: ${err instanceof Error ? err.message : err}`);
+    process.exit(1);
+  }
+
+  try {
+    expConfig.testMethodology = resolvePrompt(expConfig.testMethodology);
+    expConfig.productRequirements = resolvePrompt(expConfig.productRequirements);
+    expConfig.judgePrompt = resolvePrompt(expConfig.judgePrompt);
+  } catch (err) {
+    console.error(`Failed to load prompt file: ${err instanceof Error ? err.message : err}`);
     process.exit(1);
   }
 
