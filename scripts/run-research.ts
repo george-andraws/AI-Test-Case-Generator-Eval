@@ -65,7 +65,7 @@ export function avgJudgeScore(
   return scores.reduce((a, b) => a + b, 0) / scores.length;
 }
 
-function printComparisonTable(summaries: VariationSummary[]): void {
+export function printComparisonTable(summaries: VariationSummary[]): void {
   const W = 62;
   const heavy = "═".repeat(W);
   const light = "─".repeat(W);
@@ -75,13 +75,14 @@ function printComparisonTable(summaries: VariationSummary[]): void {
   console.log(`  (scores 0–5, averaged across all judges)`);
   console.log(heavy);
 
-  // Column headers: one per generator
-  const genCols = appConfig.generators.map((g) => g.name.substring(0, 9).padStart(10));
+  // Column headers: one per enabled generator
+  const enabledGens = appConfig.generators.filter((g) => g.enabled);
+  const genCols = enabledGens.map((g) => g.name.substring(0, 9).padStart(10));
   console.log(`${"Variation".padEnd(32)} ${genCols.join(" ")}`);
   console.log(light);
 
   for (const { name, result } of summaries) {
-    const cols = appConfig.generators.map((gen) => {
+    const cols = enabledGens.map((gen) => {
       const avg = avgJudgeScore(result.judgeScores, gen.id);
       if (avg === null) return "-".padStart(10);
       return avg.toFixed(1).padStart(10);
@@ -95,7 +96,7 @@ function printComparisonTable(summaries: VariationSummary[]): void {
   // Best-per-generator callout
   if (summaries.length > 1) {
     console.log("  Best variation per generator:");
-    for (const gen of appConfig.generators) {
+    for (const gen of enabledGens) {
       let best: { name: string; avg: number } | null = null;
       for (const { name, result } of summaries) {
         const avg = avgJudgeScore(result.judgeScores, gen.id);
@@ -185,11 +186,13 @@ export function printDryRunResearch(
   console.log(`Product Requirements: ${promptDesc(originalProtocol.productRequirements, resolvedProtocol.productRequirements)}`);
   console.log(`Judge Prompt:         ${promptDesc(originalProtocol.judgePrompt, resolvedProtocol.judgePrompt)}`);
 
-  console.log(`\nGenerator Models (${appConfig.generators.length}):`);
-  for (const g of appConfig.generators) console.log(`  • ${g.name}`);
+  const enabledGens = appConfig.generators.filter((g) => g.enabled);
+  const enabledJudges = appConfig.judges.filter((j) => j.enabled);
+  console.log(`\nGenerator Models (${enabledGens.length} enabled of ${appConfig.generators.length} total):`);
+  for (const g of enabledGens) console.log(`  • ${g.name}`);
 
-  console.log(`\nJudge Models (${appConfig.judges.length}):`);
-  for (const j of appConfig.judges) console.log(`  • ${j.name}`);
+  console.log(`\nJudge Models (${enabledJudges.length} enabled of ${appConfig.judges.length} total):`);
+  for (const j of enabledJudges) console.log(`  • ${j.name}`);
 
   console.log(`\nVariations (${resolvedProtocol.variations.length}):`);
   for (let i = 0; i < resolvedProtocol.variations.length; i++) {
@@ -203,8 +206,8 @@ export function printDryRunResearch(
   }
 
   const N = resolvedProtocol.variations.length;
-  const M = appConfig.generators.length;
-  const J = appConfig.judges.length;
+  const M = enabledGens.length;
+  const J = enabledJudges.length;
   const genRuns = N * M;
   const judgeEvals = genRuns * J;
   console.log("\nSummary:");

@@ -16,17 +16,20 @@ jest.mock('../../src/lib/config', () => ({
   __esModule: true,
   default: {
     generators: [
-      { id: 'claude', name: 'Claude Sonnet', provider: 'anthropic', model: 'claude-sonnet' },
-      { id: 'gpt', name: 'GPT-4', provider: 'openai', model: 'gpt-4' },
+      { id: 'claude', name: 'Claude Sonnet', provider: 'anthropic', model: 'claude-sonnet', enabled: false },
+      { id: 'gpt', name: 'GPT-4', provider: 'openai', model: 'gpt-4', enabled: true },
+      { id: 'gemini', name: 'Gemini Pro', provider: 'google', model: 'gemini-pro', enabled: true },
+      { id: 'llama', name: 'Llama 70B', provider: 'openrouter', model: 'meta-llama/llama-70b', enabled: true },
     ],
     judges: [
-      { id: 'claude-judge', name: 'Claude Judge', provider: 'anthropic', model: 'claude-sonnet' },
+      { id: 'claude-judge', name: 'Claude Judge', provider: 'anthropic', model: 'claude-sonnet', enabled: false },
+      { id: 'gpt-judge', name: 'GPT-4 Judge', provider: 'openai', model: 'gpt-4', enabled: true },
     ],
     langfuse: {},
   },
 }));
 
-import { runResearch, avgJudgeScore, printDryRunResearch } from '../../scripts/run-research';
+import { runResearch, avgJudgeScore, printDryRunResearch, printComparisonTable } from '../../scripts/run-research';
 import type { ResearchProtocol } from '../../scripts/run-research';
 import type { ExperimentResult } from '../../scripts/run-experiment';
 import { runExperiment } from '../../scripts/run-experiment';
@@ -312,29 +315,160 @@ describe('printDryRunResearch', () => {
     expect(previewLine).not.toContain('…');
   });
 
-  test('prints generator model names', () => {
+  test('prints generator model names (only enabled ones)', () => {
     printDryRunResearch(original, resolved);
-    expect(logs.some((l) => l.includes('Claude Sonnet'))).toBe(true);
     expect(logs.some((l) => l.includes('GPT-4'))).toBe(true);
+    expect(logs.some((l) => l.includes('Gemini Pro'))).toBe(true);
+    expect(logs.some((l) => l.includes('Llama 70B'))).toBe(true);
+    // Claude is disabled, should not appear
+    expect(logs.some((l) => l.includes('Claude Sonnet'))).toBe(false);
   });
 
-  test('prints judge model names', () => {
+  test('prints judge model names (only enabled ones)', () => {
     printDryRunResearch(original, resolved);
-    expect(logs.some((l) => l.includes('Claude Judge'))).toBe(true);
+    expect(logs.some((l) => l.includes('GPT-4 Judge'))).toBe(true);
+    // Claude Judge is disabled, should not appear
+    expect(logs.some((l) => l.includes('Claude Judge'))).toBe(false);
   });
 
-  test('prints correct summary counts: 2 variations × 2 models = 4 generator runs', () => {
+  test('prints count of enabled generators vs total', () => {
     printDryRunResearch(original, resolved);
-    expect(logs.some((l) => l.includes('2 variations') && l.includes('2 models') && l.includes('4'))).toBe(true);
+    expect(logs.some((l) => l.includes('Generator Models (3 enabled of 4 total)'))).toBe(true);
   });
 
-  test('prints correct judge evaluations: 4 outputs × 1 judge = 4', () => {
+  test('prints count of enabled judges vs total', () => {
     printDryRunResearch(original, resolved);
-    expect(logs.some((l) => l.includes('4 generator outputs') && l.includes('1 judge') && l.includes('4'))).toBe(true);
+    expect(logs.some((l) => l.includes('Judge Models (1 enabled of 2 total)'))).toBe(true);
   });
 
-  test('prints correct total API calls (4 gen + 4 judge = 8)', () => {
+  test('prints correct summary counts: 2 variations × 3 enabled models = 6 generator runs', () => {
     printDryRunResearch(original, resolved);
-    expect(logs.some((l) => l.includes('Total API calls') && l.includes('8'))).toBe(true);
+    expect(logs.some((l) => l.includes('2 variations') && l.includes('3 models') && l.includes('6'))).toBe(true);
+  });
+
+  test('prints correct judge evaluations: 6 outputs × 1 judge = 6', () => {
+    printDryRunResearch(original, resolved);
+    expect(logs.some((l) => l.includes('6 generator outputs') && l.includes('1 judge') && l.includes('6'))).toBe(true);
+  });
+
+  test('prints correct total API calls (6 gen + 6 judge = 12)', () => {
+    printDryRunResearch(original, resolved);
+    expect(logs.some((l) => l.includes('Total API calls') && l.includes('12'))).toBe(true);
+  });
+
+  test('filters disabled generators from output', () => {
+    printDryRunResearch(original, resolved);
+    const generatorSection = logs.join('\n');
+    // Should only include enabled generators
+    expect(generatorSection).toMatch(/GPT-4.*Gemini Pro.*Llama 70B/s);
+    // Should not include disabled Claude
+    const disabledGeneratorIndex = generatorSection.indexOf('Claude Sonnet');
+    const generatorHeaderIndex = generatorSection.indexOf('Generator Models');
+    expect(disabledGeneratorIndex === -1 || disabledGeneratorIndex < generatorHeaderIndex).toBe(true);
+  });
+
+  test('filters disabled judges from output', () => {
+    printDryRunResearch(original, resolved);
+    const judgeSection = logs.join('\n');
+    // Should only include enabled judges
+    expect(judgeSection).toContain('GPT-4 Judge');
+    // Claude Judge should not appear in judges section
+    const judgeHeaderIndex = judgeSection.indexOf('Judge Models');
+    expect(judgeSection.substring(judgeHeaderIndex)).not.toContain('Claude Judge');
+  });
+
+  test('excludes disabled models from generator count calculation', () => {
+    printDryRunResearch(original, resolved);
+    // With 3 enabled generators and 2 variations, should be 6 runs (not 8)
+    expect(logs.some((l) => l.includes('Generator runs') && l.includes('6'))).toBe(true);
+  });
+
+  test('excludes disabled judges from judge count calculation', () => {
+    printDryRunResearch(original, resolved);
+    // With 1 enabled judge and 6 generator outputs, should be 6 evaluations (not 12)
+    expect(logs.some((l) => l.includes('Judge evaluations') && l.includes('6'))).toBe(true);
+  });
+});
+
+// ── printComparisonTable ───────────────────────────────────────────────────────
+
+describe('printComparisonTable', () => {
+  let logs: string[];
+
+  beforeEach(() => {
+    logs = [];
+    jest.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  test('only includes enabled generators as columns', () => {
+    const summaries = [
+      {
+        name: 'M1-baseline',
+        result: {
+          judgeScores: {
+            'gpt-judge': {
+              gpt: { success: true, score: 4 },
+              gemini: { success: true, score: 3 },
+              llama: { success: true, score: 3 },
+              claude: { success: true, score: 2 }, // disabled generator
+            },
+          },
+        },
+      },
+    ];
+    printComparisonTable(summaries);
+    const output = logs.join('\n');
+    // Should contain enabled generators as columns
+    expect(output).toMatch(/GPT-4/);
+    expect(output).toMatch(/Gemini/);
+    expect(output).toMatch(/Llama/);
+    // Should not contain disabled Claude as a column
+    expect(output).not.toMatch(/Claude Sonnet/);
+  });
+
+  test('best-per-generator only shows enabled generators', () => {
+    const summaries = [
+      {
+        name: 'M1-baseline',
+        result: {
+          judgeScores: {
+            'gpt-judge': {
+              gpt: { success: true, score: 4 },
+              gemini: { success: true, score: 3 },
+              llama: { success: true, score: 2 },
+              claude: { success: true, score: 5 }, // disabled, highest but shouldn't appear
+            },
+          },
+        },
+      },
+      {
+        name: 'M2-gherkin',
+        result: {
+          judgeScores: {
+            'gpt-judge': {
+              gpt: { success: true, score: 3 },
+              gemini: { success: true, score: 4 },
+              llama: { success: true, score: 3 },
+              claude: { success: true, score: 1 },
+            },
+          },
+        },
+      },
+    ];
+    printComparisonTable(summaries);
+    const output = logs.join('\n');
+    // Should show best variation for enabled generators
+    expect(output).toMatch(/Best variation per generator:/);
+    expect(output).toContain('GPT-4');
+    expect(output).toContain('Gemini');
+    expect(output).toContain('Llama');
+    // Should not mention Claude
+    expect(output).not.toMatch(/Claude Sonnet.*avg/);
   });
 });
