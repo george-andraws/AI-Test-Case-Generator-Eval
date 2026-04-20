@@ -96,6 +96,9 @@ export default function Page() {
   // Human scores as last persisted to disk — used to detect changes for "Update" mode
   const [savedHumanScores, setSavedHumanScores] = useState<Record<string, number | null>>({});
 
+  // ── Judge running ─────────────────────────────────────────────────────────
+  const [overwriteExisting, setOverwriteExisting] = useState(false);
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const enabledGenerators = config.generators.filter((m) => m.enabled);
   const enabledJudges = config.judges.filter((j) => j.enabled);
@@ -677,6 +680,128 @@ export default function Page() {
     }
   }
 
+  // ── Run judges ────────────────────────────────────────────────────────────
+
+  async function handleRunJudges() {
+    setPhase("judging");
+    setSubmitStatus("idle");
+    setSubmitError(null);
+
+    // Determine which judges to run: enabled judges that don't have scores (or all if overwrite)
+    const judgesToRun = enabledJudges.filter((judge) => {
+      if (overwriteExisting) return true;
+      // Check if any generator panel is missing this judge's score
+      return successfulPanels.some((panel) => !judgeResults[judge.id]?.[panel.id] || judgeResults[judge.id][panel.id].status !== "success");
+    });
+
+    if (judgesToRun.length === 0) return;
+
+    // Set loading state for judges being run
+    setJudgeResults((prev) => {
+      const newResults = { ...prev };
+      for (const judge of judgesToRun) {
+        if (!newResults[judge.id]) newResults[judge.id] = {};
+        for (const panel of successfulPanels) {
+          if (overwriteExisting || !newResults[judge.id][panel.id] || newResults[judge.id][panel.id].status !== "success") {
+            newResults[judge.id][panel.id] = { status: "loading" };
+          }
+        }
+      }
+      return newResults;
+    });
+
+    // Capture form values
+    const capturedForm = form;
+    const capturedImages = images;
+
+    // Run judges in parallel for each generator
+    const judgePromises = judgesToRun.flatMap((judge) =>
+      successfulPanels
+        .filter((panel) => overwriteExisting || !judgeResults[judge.id]?.[panel.id] || judgeResults[judge.id][panel.id].status !== "success")
+        .map(async (panel): Promise<{ judgeId: string; generatorId: string; result: any }> => {
+          try {
+            const res = await fetch("/api/judge", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                url: capturedForm.url,
+                productRequirements: capturedForm.productRequirements,
+                judgePrompt: capturedForm.judgePrompt,
+                judgeId: judge.id,
+                generations: { [panel.id]: { modelName: panel.name, output: panel.output ?? "" } },
+                images: capturedImages.length > 0
+                  ? capturedImages.map(({ base64, mimeType }) => ({ base64, mimeType }))
+                  : undefined,
+              }),
+            });
+            const data = await res.json();
+            const result = res.ok ? data.results?.[judge.id]?.[panel.id] : null;
+
+            setJudgeResults((prev) => ({
+              ...prev,
+              [judge.id]: {
+                ...prev[judge.id],
+                [panel.id]: result?.success
+                  ? {
+                      status: "success",
+                      score: result.score,
+                      feedback: result.feedback,
+                      rawData: result.rawData,
+                      selfEvaluation: result.selfEvaluation,
+                      langfuseTraceId: result.langfuseTraceId,
+                    }
+                  : { status: "error", error: result?.error ?? data.error ?? "Request failed" },
+              },
+            }));
+
+            return { judgeId: judge.id, generatorId: panel.id, result };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            setJudgeResults((prev) => ({
+              ...prev,
+              [judge.id]: {
+                ...prev[judge.id],
+                [panel.id]: { status: "error", error: message },
+              },
+            }));
+            return { judgeId: judge.id, generatorId: panel.id, result: null };
+          }
+        })
+    );
+
+    const judgeOutcomes = await Promise.allSettled(judgePromises);
+
+    // Save results if we have a revision
+    if (currentRevisionId !== null) {
+      const judgesScoresPatch: RevisionData["scores"]["judges"] = {};
+      for (const outcome of judgeOutcomes) {
+        if (outcome.status === "fulfilled" && outcome.value.result?.success) {
+          const { judgeId, generatorId, result } = outcome.value;
+          if (!judgesScoresPatch[judgeId]) judgesScoresPatch[judgeId] = {};
+          judgesScoresPatch[judgeId][generatorId] = {
+            score: result.score,
+            feedback: result.feedback,
+            langfuseTraceId: result.langfuseTraceId,
+            rawData: result.rawData,
+          };
+        }
+      }
+      if (Object.keys(judgesScoresPatch).length > 0) {
+        fetch("/api/data", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: capturedForm.url,
+            revision: currentRevisionId,
+            scores: { judges: judgesScoresPatch },
+          }),
+        }).catch(() => {}); // fire-and-forget
+      }
+    }
+
+    setPhase("done");
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const isRunning = phase === "generating" || phase === "judging";
@@ -839,9 +964,34 @@ export default function Page() {
         {/* ── Section 3: Model Outputs ── */}
         {panels.length > 0 && (
           <div className="mb-6">
-            <h2 className="mb-4 text-xs font-semibold uppercase tracking-wide text-gray-400">
-              Model Outputs
-            </h2>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Model Outputs
+              </h2>
+              {successfulPanels.length > 0 && (
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={overwriteExisting}
+                      onChange={(e) => setOverwriteExisting(e.target.checked)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    Overwrite existing
+                  </label>
+                  <button
+                    onClick={handleRunJudges}
+                    disabled={phase === "judging" || enabledJudges.length === 0}
+                    className="inline-flex items-center gap-2 rounded-md bg-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {phase === "judging" && (
+                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    )}
+                    Run Judges
+                  </button>
+                </div>
+              )}
+            </div>
 
             {/* Full-width grid of panels */}
             <div
@@ -852,10 +1002,10 @@ export default function Page() {
                 <ModelOutputPanel
                   key={panel.id}
                   panel={panel}
-                  judgeModels={enabledJudges}
+                  judgeModels={config.judges}
                   judgeResults={
                     Object.fromEntries(
-                      enabledJudges.map((j) => [j.id, judgeResults[j.id]?.[panel.id] ?? { status: "idle" }])
+                      config.judges.map((j) => [j.id, judgeResults[j.id]?.[panel.id] ?? { status: "idle" }])
                     ) as Record<string, JudgePanelEntry>
                   }
                   onScoreChange={(score) => updateHumanScore(panel.id, score)}

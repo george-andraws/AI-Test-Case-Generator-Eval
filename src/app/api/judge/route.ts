@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
   const { url, productRequirements, judgePrompt, generations, judgeId, images } = body;
   const hasImages = Array.isArray(images) && images.length > 0;
   if (!url || !productRequirements || !generations) {
+    console.error("[judge] 400 missing fields", { url: !!url, productRequirements: !!productRequirements, generations: !!generations, judgeId });
     return NextResponse.json(
       { error: "Missing required fields: url, productRequirements, generations" },
       { status: 400 }
@@ -55,6 +56,7 @@ export async function POST(req: NextRequest) {
     : config.judges.filter((j) => j.enabled);
 
   if (judgesToRun.length === 0) {
+    console.error("[judge] 400 no judges matched", { judgeId });
     return NextResponse.json({ error: `Unknown judgeId: ${judgeId}` }, { status: 400 });
   }
 

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { ModelConfig } from "@/lib/config";
+import config from "@/lib/config";
 
 export interface JudgePanelEntry {
   status: "idle" | "loading" | "success" | "error";
@@ -78,6 +79,7 @@ export function JudgeScoreSection({ judgeModels, results }: Props): JSX.Element 
       <p className="text-xs font-medium text-gray-500 mb-2">Judge scores</p>
       {judgeModels.map((judge) => {
         const entry = results[judge.id];
+        const isEnabled = config.judges.find(j => j.id === judge.id)?.enabled ?? false;
         const isT2Open = tier2Expanded[judge.id] ?? false;
         const isT3Open = tier3Expanded[judge.id] ?? false;
         const showT3Toggle = entry?.status === "success" && hasDetailedData(entry.rawData);
@@ -112,18 +114,29 @@ export function JudgeScoreSection({ judgeModels, results }: Props): JSX.Element 
                         (weighted: {weightedTotal.toFixed(1)})
                       </span>
                     )}
+                    {!isEnabled && (
+                      <span className="ml-1 text-xs text-gray-400">(disabled)</span>
+                    )}
                   </span>
                 )}
                 {entry?.status === "error" && (
-                  <span className="text-red-400 shrink-0">—</span>
+                  <span className="text-red-500 font-medium shrink-0">error</span>
                 )}
-                {(!entry || entry.status === "idle") && (
-                  <span className="text-gray-300 shrink-0">—</span>
+                {(!entry || entry.status === "idle") && entry?.status !== "loading" && (
+                  <span className="text-gray-300 shrink-0">
+                    {isEnabled ? "—" : ""}
+                  </span>
                 )}
-                <span className="text-gray-500 truncate">
+                <span className={`truncate ${!isEnabled ? "text-gray-400" : "text-gray-500"}`}>
                   {judge.name}
                   {entry?.selfEvaluation && (
                     <span className="ml-1 text-red-500">(self)</span>
+                  )}
+                  {!isEnabled && (!entry || entry.status === "idle") && (
+                    <span className="ml-1 text-xs text-gray-400">disabled</span>
+                  )}
+                  {isEnabled && (!entry || entry.status === "idle") && (
+                    <span className="ml-1 text-xs text-gray-400">pending</span>
                   )}
                 </span>
               </div>
@@ -138,9 +151,9 @@ export function JudgeScoreSection({ judgeModels, results }: Props): JSX.Element 
                   <Chevron expanded={isT2Open} />
                 </button>
               )}
-              {entry?.status === "error" && (
-                <span className="text-red-400 text-xs truncate" title={entry.error}>
-                  unavailable
+              {entry?.status === "error" && entry.error && (
+                <span className="text-red-400 text-xs truncate max-w-[200px]" title={entry.error}>
+                  {entry.error}
                 </span>
               )}
             </div>

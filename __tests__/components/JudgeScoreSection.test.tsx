@@ -10,6 +10,14 @@ import {
 } from '../../src/app/components/JudgeScoreSection';
 import type { JudgePanelEntry } from '../../src/app/components/JudgeScoreSection';
 
+// Mock config
+jest.mock('../../src/lib/config', () => ({
+  judges: [
+    { id: 'gpt-judge', name: 'GPT Judge', enabled: true },
+    { id: 'claude-judge', name: 'Claude Judge', enabled: false },
+  ],
+}));
+
 describe('formatAdjustedWeight', () => {
   test('formats whole-number percentages correctly', () => {
     expect(formatAdjustedWeight(21.1)).toBe('21.1%');
@@ -36,6 +44,17 @@ const judgeModel = {
   maxTokens: 8192,
   temperature: 0.2,
   enabled: true,
+};
+
+const disabledJudgeModel = {
+  id: 'claude-judge',
+  name: 'Claude Judge',
+  provider: 'anthropic' as const,
+  model: 'claude-3.5-sonnet',
+  apiKeyEnvVar: 'ANTHROPIC_API_KEY',
+  maxTokens: 8192,
+  temperature: 0.2,
+  enabled: false,
 };
 
 function makeEntry(overrides: Partial<JudgePanelEntry> = {}): JudgePanelEntry {
@@ -77,6 +96,18 @@ describe('JudgeScoreSection basic rendering', () => {
     expect(container.querySelector('.animate-spin')).toBeInTheDocument();
   });
 
+  test('shows "error" badge and error message when status=error', () => {
+    renderSection(makeEntry({ status: 'error', score: undefined, feedback: undefined, error: 'Request failed' }));
+    expect(screen.getByText('error')).toBeInTheDocument();
+    expect(screen.getByText('Request failed')).toBeInTheDocument();
+  });
+
+  test('shows "error" badge without message when error field is absent', () => {
+    renderSection(makeEntry({ status: 'error', score: undefined, feedback: undefined }));
+    expect(screen.getByText('error')).toBeInTheDocument();
+    expect(screen.queryByTitle('')).not.toBeInTheDocument();
+  });
+
   test('shows dash when status=idle', () => {
     renderSection(makeEntry({ status: 'idle', score: undefined, feedback: undefined }));
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
@@ -92,6 +123,54 @@ describe('JudgeScoreSection basic rendering', () => {
   test('does not show "(self)" when selfEvaluation=false', () => {
     renderSection(makeEntry({ selfEvaluation: false }));
     expect(screen.queryByText('(self)')).not.toBeInTheDocument();
+  });
+
+  test('shows "pending" for enabled judge with no score', () => {
+    render(
+      <JudgeScoreSection
+        judgeModels={[judgeModel]}
+        results={{ 'gpt-judge': { status: 'idle' } }}
+      />
+    );
+    expect(screen.getByText('pending')).toBeInTheDocument();
+  });
+
+  test('shows "disabled" for disabled judge with no score', () => {
+    render(
+      <JudgeScoreSection
+        judgeModels={[disabledJudgeModel]}
+        results={{ 'claude-judge': { status: 'idle' } }}
+      />
+    );
+    expect(screen.getByText('disabled')).toBeInTheDocument();
+    expect(screen.getByText('Claude Judge')).toHaveClass('text-gray-400');
+  });
+
+  test('shows "(disabled)" for disabled judge with existing score', () => {
+    render(
+      <JudgeScoreSection
+        judgeModels={[disabledJudgeModel]}
+        results={{ 'claude-judge': makeEntry() }}
+      />
+    );
+    expect(screen.getByText('(disabled)')).toBeInTheDocument();
+    expect(screen.getByText(/4\/5/)).toBeInTheDocument();
+  });
+
+  test('renders all judges including disabled ones', () => {
+    render(
+      <JudgeScoreSection
+        judgeModels={[judgeModel, disabledJudgeModel]}
+        results={{
+          'gpt-judge': { status: 'idle' },
+          'claude-judge': makeEntry()
+        }}
+      />
+    );
+    expect(screen.getByText('GPT Judge')).toBeInTheDocument();
+    expect(screen.getByText('Claude Judge')).toBeInTheDocument();
+    expect(screen.getByText('pending')).toBeInTheDocument();
+    expect(screen.getByText('(disabled)')).toBeInTheDocument();
   });
 });
 
