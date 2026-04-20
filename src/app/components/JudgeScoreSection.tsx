@@ -60,7 +60,13 @@ function hasDetailedData(rawData?: Record<string, unknown>): boolean {
   return !!(rawData.dimensions || rawData.strengths || rawData.critical_gaps);
 }
 
-export function JudgeScoreSection({ judgeModels, results }: Props) {
+export function formatAdjustedWeight(weight: number | null | undefined): string {
+  if (weight == null || Number.isNaN(weight)) return "N/A";
+  const normalized = weight > 1 ? weight : weight * 100;
+  return `${normalized.toFixed(1)}%`;
+}
+
+export function JudgeScoreSection({ judgeModels, results }: Props): JSX.Element | null {
   const [tier2Expanded, setTier2Expanded] = useState<Record<string, boolean>>({});
   const [tier3Expanded, setTier3Expanded] = useState<Record<string, boolean>>({});
   const [evidenceExpanded, setEvidenceExpanded] = useState<Record<string, boolean>>({});
@@ -204,7 +210,7 @@ export function JudgeScoreSection({ judgeModels, results }: Props) {
 
                                       {/* Weight */}
                                       <span className="shrink-0 text-gray-400">
-                                        {(dim.adjusted_weight * 100).toFixed(0)}%
+                                        {formatAdjustedWeight(dim.adjusted_weight)}
                                       </span>
 
                                       {/* Evidence toggle */}

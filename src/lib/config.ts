@@ -46,7 +46,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "OPENAI_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
-      enabled: true,
+      enabled: false,
     },
     {
       id: "gemini-3.1-flash-lite-preview",
@@ -88,7 +88,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "OPENROUTER_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
-      enabled: false,
+      enabled: true,
     },
     {
       id: "mistral",
@@ -96,7 +96,7 @@ const config: AppConfig = {
       provider: "openrouter",
       model: "mistralai/mistral-large",
       apiKeyEnvVar: "OPENROUTER_API_KEY",
-      maxTokens: 4096,
+      maxTokens: 2949,
       temperature: 0.3,
       enabled: false,
     },
@@ -123,7 +123,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "OPENAI_API_KEY",
       maxTokens: 8192,
       temperature: 0.2,
-      enabled: true,
+      enabled: false,
     },
     {
       id: "gemini-3.1-flash-lite-preview-judge",
@@ -144,6 +144,16 @@ const config: AppConfig = {
       maxTokens: 2048,
       temperature: 0.2,
       enabled: true,
+    },
+    {
+      id: "mistral-judge",
+      name: "Mistral Large (Judge)",
+      provider: "openrouter",
+      model: "mistralai/mistral-large",
+      apiKeyEnvVar: "OPENROUTER_API_KEY",
+      maxTokens: 2949,
+      temperature: 0.3,
+      enabled: false,
     },
   ],
 

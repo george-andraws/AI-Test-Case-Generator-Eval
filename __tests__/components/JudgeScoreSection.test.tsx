@@ -2,10 +2,30 @@
  * @jest-environment jest-environment-jsdom
  */
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { JudgeScoreSection } from '../../src/app/components/JudgeScoreSection';
+import {
+  JudgeScoreSection,
+  formatAdjustedWeight,
+} from '../../src/app/components/JudgeScoreSection';
 import type { JudgePanelEntry } from '../../src/app/components/JudgeScoreSection';
+
+describe('formatAdjustedWeight', () => {
+  test('formats whole-number percentages correctly', () => {
+    expect(formatAdjustedWeight(21.1)).toBe('21.1%');
+    expect(formatAdjustedWeight(5)).toBe('5.0%');
+  });
+
+  test('formats decimal values as percentages correctly', () => {
+    expect(formatAdjustedWeight(0.2110)).toBe('21.1%');
+    expect(formatAdjustedWeight(0.158)).toBe('15.8%');
+  });
+
+  test('returns N/A for null or undefined values', () => {
+    expect(formatAdjustedWeight(null)).toBe('N/A');
+    expect(formatAdjustedWeight(undefined)).toBe('N/A');
+  });
+});
 
 const judgeModel = {
   id: 'gpt-judge',
@@ -195,6 +215,28 @@ describe('Tier 3 detailed evaluation', () => {
     openTier2();
     openTier3();
     expect(screen.getByText('Score is 0.2 above weighted')).toBeInTheDocument();
+  });
+
+  test('dimension adjusted_weight values render with correct percentage formatting and N/A handling', () => {
+    const rawData = {
+      score: 4,
+      feedback: 'Coverage details.',
+      dimensions: {
+        'Coverage breadth': { score: 4, adjusted_weight: 21.1, evidence: '' },
+        'Coverage depth': { score: 3, adjusted_weight: 0.158, evidence: '' },
+        'Requirement traceability': { score: null, adjusted_weight: null, evidence: '' },
+      },
+    };
+
+    renderSection(makeEntry({ score: 4, feedback: 'Coverage details.', rawData }));
+    openTier2();
+    openTier3();
+
+    expect(screen.getByText('21.1%')).toBeInTheDocument();
+    expect(screen.getByText('15.8%')).toBeInTheDocument();
+
+    const naWeight = screen.getAllByText('N/A').find((node) => node.classList.contains('text-gray-400'));
+    expect(naWeight).toBeDefined();
   });
 
   // ── Applicability shapes ────────────────────────────────────────────────────
