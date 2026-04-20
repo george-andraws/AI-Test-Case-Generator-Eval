@@ -143,7 +143,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "XAI_API_KEY",
       maxTokens: 2048,
       temperature: 0.2,
-      enabled: false,
+      enabled: true,
     },
     {
       id: "grok-3-judge",
