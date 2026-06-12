@@ -1,0 +1,5 @@
+/.env*
+/.next
+/data
+/node_modules
+/tsconfig.tsbuildinfo

@@ -5,9 +5,7 @@ const mockRatelimitConstructor = jest.fn().mockImplementation(() => ({
 (mockRatelimitConstructor as any).slidingWindow = jest.fn(() => ({ type: 'sliding-window' }));
 
 jest.mock('@upstash/redis', () => ({
-  Redis: {
-    fromEnv: jest.fn(() => ({})),
-  },
+  Redis: jest.fn().mockImplementation(() => ({})),
 }));
 
 jest.mock('@upstash/ratelimit', () => ({
@@ -21,6 +19,8 @@ describe('demo rate limiting', () => {
     jest.resetModules();
     limitMock.mockReset();
     process.env = { ...oldEnv, APP_STORAGE_MODE: 'demo' };
+    process.env.KV_REST_API_URL = 'https://redis.example.com';
+    process.env.KV_REST_API_TOKEN = 'token';
   });
 
   afterEach(() => {

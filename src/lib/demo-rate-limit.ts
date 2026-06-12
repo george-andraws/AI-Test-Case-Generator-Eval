@@ -1,13 +1,14 @@
 import { Ratelimit } from "@upstash/ratelimit";
 import { NextResponse, type NextRequest } from "next/server";
-import { Redis } from "@upstash/redis";
+import type { Redis } from "@upstash/redis";
 import { isDemoMode } from "@/lib/runtime";
+import { createRedisFromEnv } from "@/lib/redis";
 
 let redis: Redis | null = null;
 let limiter: Ratelimit | null = null;
 
 function getRedis(): Redis {
-  if (!redis) redis = Redis.fromEnv();
+  if (!redis) redis = createRedisFromEnv();
   return redis;
 }
 

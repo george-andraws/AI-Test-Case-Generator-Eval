@@ -3,7 +3,9 @@ export const DEMO_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 export type StorageMode = "local" | "demo";
 
 export function getStorageMode(): StorageMode {
-  return process.env.APP_STORAGE_MODE === "demo" ? "demo" : "local";
+  if (process.env.APP_STORAGE_MODE === "demo") return "demo";
+  if (process.env.APP_STORAGE_MODE === "local") return "local";
+  return process.env.VERCEL === "1" ? "demo" : "local";
 }
 
 export function isDemoMode(): boolean {

@@ -4,15 +4,13 @@ const store = new Map<string, unknown>();
 const expirations = new Map<string, number>();
 
 jest.mock('@upstash/redis', () => ({
-  Redis: {
-    fromEnv: jest.fn(() => ({
+  Redis: jest.fn().mockImplementation(() => ({
       get: jest.fn(async (key: string) => store.get(key) ?? null),
       set: jest.fn(async (key: string, value: unknown, opts?: { ex?: number }) => {
         store.set(key, value);
         if (opts?.ex) expirations.set(key, opts.ex);
       }),
     })),
-  },
 }));
 
 const baseRevision: Omit<RevisionData, 'revision' | 'timestamp'> = {
@@ -44,6 +42,8 @@ describe('demo storage mode', () => {
     store.clear();
     expirations.clear();
     process.env = { ...oldEnv, APP_STORAGE_MODE: 'demo' };
+    process.env.KV_REST_API_URL = 'https://redis.example.com';
+    process.env.KV_REST_API_TOKEN = 'token';
   });
 
   afterEach(() => {

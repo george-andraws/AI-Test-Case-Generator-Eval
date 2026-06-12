@@ -1,8 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
-import { Redis } from "@upstash/redis";
+import type { Redis } from "@upstash/redis";
 import type { StorageContext } from "@/lib/demo-session";
 import { DEMO_SESSION_TTL_SECONDS, isDemoMode } from "@/lib/runtime";
+import { createRedisFromEnv } from "@/lib/redis";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ const DATA_DIR = path.join(process.cwd(), "data");
 let redis: Redis | null = null;
 
 function getRedis(): Redis {
-  if (!redis) redis = Redis.fromEnv();
+  if (!redis) redis = createRedisFromEnv();
   return redis;
 }
 
