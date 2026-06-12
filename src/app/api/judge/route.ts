@@ -3,6 +3,8 @@ import config from "@/lib/config";
 import { callLLM, flushSpans, scoreTrace } from "@/lib/llm";
 import type { LLMImage } from "@/lib/llm";
 import { parseJudgeResponse } from "@/lib/judge-parser";
+import { applyDemoSessionCookie, getDemoSession } from "@/lib/demo-session";
+import { enforceDemoRateLimit } from "@/lib/demo-rate-limit";
 
 export const maxDuration = 120;
 
@@ -20,6 +22,7 @@ interface JudgeRequestBody {
   judgeId?: string;
   /** Optional screenshots to provide visual context when judging. */
   images?: LLMImage[];
+  langfuseEnabled?: boolean;
 }
 
 interface JudgeResult {
@@ -34,6 +37,13 @@ interface JudgeResult {
 
 export async function POST(req: NextRequest) {
   try {
+  const session = getDemoSession(req);
+  const rateLimitResponse = await enforceDemoRateLimit(req, "judge", session?.id);
+  if (rateLimitResponse) {
+    applyDemoSessionCookie(rateLimitResponse, session);
+    return rateLimitResponse;
+  }
+
   let body: JudgeRequestBody;
   try {
     body = await req.json();
@@ -41,7 +51,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { url, productRequirements, judgePrompt, generations, judgeId, images } = body;
+  const { url, productRequirements, judgePrompt, generations, judgeId, images, langfuseEnabled } = body;
   const hasImages = Array.isArray(images) && images.length > 0;
   if (!url || !productRequirements || !generations) {
     console.error("[judge] 400 missing fields", { url: !!url, productRequirements: !!productRequirements, generations: !!generations, judgeId });
@@ -108,6 +118,7 @@ If no specific scoring criteria were provided in your system instructions, use t
       const promise = callLLM({
         provider: judge.provider,
         model: judge.model,
+        apiKeyEnvVar: judge.apiKeyEnvVar,
         systemPrompt: judgePrompt,
         userPrompt,
         maxTokens: judge.maxTokens,
@@ -119,6 +130,7 @@ If no specific scoring criteria were provided in your system instructions, use t
           url,
           tags: ["judge", judge.id, generatorId],
         },
+        langfuseEnabled,
       }).then((res): JudgeResult => {
         const parsed = parseJudgeResponse(res.text);
         if (parsed) {
@@ -179,7 +191,7 @@ If no specific scoring criteria were provided in your system instructions, use t
             value: result.score,
             comment: result.feedback,
             source: "llm_judge",
-          })
+          }, { enabled: langfuseEnabled })
         );
       }
     }
@@ -187,7 +199,9 @@ If no specific scoring criteria were provided in your system instructions, use t
   await Promise.allSettled(scoreCalls);
 
   await flushSpans();
-  return NextResponse.json({ results });
+  const response = NextResponse.json({ results });
+  applyDemoSessionCookie(response, session);
+  return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });

@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from "fs";
 import path from "path";
 
 import appConfig from "../src/lib/config";
-import { callLLM, initTracing, flushTracing, scoreTrace } from "../src/lib/llm";
+import { callLLM, initTracing, flushTracing, scoreTrace, shouldUseLangfuse } from "../src/lib/llm";
 import type { LLMImage } from "../src/lib/llm";
 import { saveRevision, updateRevision, urlToSlug } from "../src/lib/storage";
 import type { ConfigSnapshot, RevisionData } from "../src/lib/storage";
@@ -183,6 +183,7 @@ export async function runExperiment(
       callLLM({
         provider: model.provider,
         model: model.model,
+        apiKeyEnvVar: model.apiKeyEnvVar,
         systemPrompt: testMethodology,
         userPrompt,
         maxTokens: model.maxTokens,
@@ -312,6 +313,7 @@ export async function runExperiment(
       const promise = callLLM({
         provider: judge.provider,
         model: judge.model,
+        apiKeyEnvVar: judge.apiKeyEnvVar,
         systemPrompt: judgePrompt,
         userPrompt: jUserPrompt,
         maxTokens: judge.maxTokens,
@@ -595,6 +597,7 @@ export async function runJudgeOnly(
       const promise = callLLM({
         provider: judge.provider,
         model: judge.model,
+        apiKeyEnvVar: judge.apiKeyEnvVar,
         systemPrompt: judgePrompt,
         userPrompt: jUserPrompt,
         maxTokens: judge.maxTokens,
@@ -750,7 +753,7 @@ async function main() {
     process.exit(1);
   }
 
-  if (!dryRun) initTracing();
+  if (!dryRun && shouldUseLangfuse()) initTracing();
 
   let rawConfig: ExperimentConfig;
   try {

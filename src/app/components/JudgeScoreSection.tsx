@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { ReactElement } from "react";
 import type { ModelConfig } from "@/lib/config";
 import config from "@/lib/config";
 
@@ -67,7 +68,7 @@ export function formatAdjustedWeight(weight: number | null | undefined): string 
   return `${normalized.toFixed(1)}%`;
 }
 
-export function JudgeScoreSection({ judgeModels, results }: Props): JSX.Element | null {
+export function JudgeScoreSection({ judgeModels, results }: Props): ReactElement | null {
   const [tier2Expanded, setTier2Expanded] = useState<Record<string, boolean>>({});
   const [tier3Expanded, setTier3Expanded] = useState<Record<string, boolean>>({});
   const [evidenceExpanded, setEvidenceExpanded] = useState<Record<string, boolean>>({});

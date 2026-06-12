@@ -1,4 +1,4 @@
-import { getLangfuseClient } from "./tracing";
+import { getLangfuseClient, shouldUseLangfuse } from "./tracing";
 
 export type ScoreSource = "human" | "llm_judge";
 
@@ -11,6 +11,10 @@ export interface ScoreParams {
   source: ScoreSource;
 }
 
+export interface ScoreOptions {
+  enabled?: boolean;
+}
+
 /**
  * Send a score to Langfuse for a previously completed trace.
  *
@@ -21,8 +25,10 @@ export interface ScoreParams {
  * @example
  * await scoreTrace({ traceId, name: "correctness", value: 0.9, source: "llm_judge" });
  */
-export async function scoreTrace(params: ScoreParams): Promise<void> {
+export async function scoreTrace(params: ScoreParams, options?: ScoreOptions): Promise<void> {
+  if (!shouldUseLangfuse(options?.enabled)) return;
   const client = getLangfuseClient();
+  if (!client) return;
   client.score.create({
     traceId: params.traceId,
     name: params.name,

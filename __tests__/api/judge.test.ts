@@ -220,7 +220,18 @@ describe('POST /api/judge', () => {
         traceId: 'trace-abc123',
         value: 4,
         source: 'llm_judge',
-      })
+      }),
+      expect.objectContaining({ enabled: undefined })
+    );
+  });
+
+  test('langfuseEnabled flag is passed to callLLM and scoreTrace', async () => {
+    const req = makeRequest({ ...validBody, judgeId: 'claude-judge', langfuseEnabled: false });
+    await POST(req as any);
+    expect(mockCallLLM).toHaveBeenCalledWith(expect.objectContaining({ langfuseEnabled: false }));
+    expect(mockScoreTrace).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ enabled: false })
     );
   });
 

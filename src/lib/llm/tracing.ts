@@ -3,6 +3,7 @@ import { trace } from "@opentelemetry/api";
 import { LangfuseSpanProcessor } from "@langfuse/otel";
 import { LangfuseClient } from "@langfuse/client";
 import config from "@/lib/config";
+import { isLangfuseConfigured, resolveLangfuseEnabled } from "@/lib/runtime";
 
 let _sdk: NodeSDK | null = null;
 let _processor: LangfuseSpanProcessor | null = null;
@@ -39,7 +40,12 @@ export function getTracer() {
   return trace.getTracer("test-case-eval-tool");
 }
 
-export function getLangfuseClient(): LangfuseClient {
+export function shouldUseLangfuse(explicit?: boolean): boolean {
+  return resolveLangfuseEnabled(explicit);
+}
+
+export function getLangfuseClient(): LangfuseClient | null {
+  if (!isLangfuseConfigured()) return null;
   if (!_client) {
     // Create a scoring-only client from env vars directly.
     // This works even in routes that never call callLLM (e.g. /api/scores).
@@ -47,9 +53,7 @@ export function getLangfuseClient(): LangfuseClient {
     const publicKey = process.env[lf.publicKeyEnvVar];
     const secretKey = process.env[lf.secretKeyEnvVar];
     if (!publicKey || !secretKey) {
-      throw new Error(
-        `Langfuse env vars not set: ${lf.publicKeyEnvVar}, ${lf.secretKeyEnvVar}`
-      );
+      return null;
     }
     _client = new LangfuseClient({ publicKey, secretKey, baseUrl: lf.baseUrl });
   }

@@ -21,12 +21,13 @@ OPENAI_API_KEY=""
 GOOGLE_API_KEY=""
 XAI_API_KEY=""
 
-# Langfuse observability (https://langfuse.com)
+# Optional Langfuse observability (https://langfuse.com)
+LANGFUSE_ENABLED="true"
 LANGFUSE_PUBLIC_KEY=""
 LANGFUSE_SECRET_KEY=""
 ```
 
-All keys are optional — if a key is missing, that model's panel will show an error and the rest will still run.
+All keys are optional. If a model key is missing, that model's panel will show an error and the rest will still run. If Langfuse keys are missing or `LANGFUSE_ENABLED=false`, generation, judging, and local persistence still work without traces.
 
 **3. Start the dev server**
 
@@ -52,7 +53,8 @@ Open [http://localhost:3000](http://localhost:3000).
 4. Click **Generate test cases**. Each model runs in parallel — panels update independently as results arrive.
 5. Click **Run judges** to score each generator's output with all three judge models.
 6. Set a **Human score** (0–5) for each panel.
-7. Click **Submit human scores** to persist everything and send scores to Langfuse.
+7. Use **Send traces and scores to Langfuse** to control observability for the run.
+8. Click **Submit human scores** / **Save human scores** to persist everything.
 
 Data is saved incrementally — generation results are written to disk immediately after step 4, judge scores after step 5. You won't lose work if you close the tab before submitting.
 
@@ -113,7 +115,27 @@ data/
 
 Each revision record stores: prompts, generation outputs (text, token usage, latency, Langfuse trace ID), human scores, judge scores, a config snapshot, and image paths.
 
-There is no database, no authentication, and no cloud dependency beyond the LLM and Langfuse APIs.
+Local mode has no database, no authentication, and no cloud dependency beyond whichever LLM APIs you enable.
+
+### Hosted demo storage
+
+The hosted demo uses a separate runtime mode and does not change local research storage:
+
+```bash
+APP_STORAGE_MODE="demo"
+NEXT_PUBLIC_MODEL_PROFILE="demo"
+OPENROUTER_API_KEY=""
+OPENROUTER_COMPARE_API_KEY=""
+OPENROUTER_DEMO_PRIMARY_MODEL="meta-llama/llama-3.2-3b-instruct:free"
+OPENROUTER_DEMO_COMPARE_MODEL="google/gemma-3-27b-it:free"
+UPSTASH_REDIS_REST_URL=""
+UPSTASH_REDIS_REST_TOKEN=""
+BLOB_READ_WRITE_TOKEN=""
+DEMO_SESSION_SECRET=""
+CRON_SECRET=""
+```
+
+In demo mode, users get an anonymous signed session cookie. Revision data is stored in Upstash Redis with a 7-day TTL, uploaded screenshots are stored in Vercel Blob, and `/api/cleanup` can be called by a scheduled job to delete expired demo blobs. For deployment, keep API keys server-side in Vercel environment variables; do not expose them as `NEXT_PUBLIC_*`.
 
 ---
 

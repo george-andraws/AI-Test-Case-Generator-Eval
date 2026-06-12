@@ -1,3 +1,5 @@
+import { isDemoModelProfile } from "@/lib/runtime";
+
 export type Provider = "anthropic" | "openai" | "google" | "grok" | "openrouter";
 
 export interface ModelConfig {
@@ -22,6 +24,12 @@ export interface AppConfig {
   judges: ModelConfig[];
   langfuse: LangfuseConfig;
 }
+
+const demoProfile = isDemoModelProfile();
+const openRouterDemoPrimaryModel =
+  process.env.OPENROUTER_DEMO_PRIMARY_MODEL ?? "meta-llama/llama-3.2-3b-instruct:free";
+const openRouterDemoCompareModel =
+  process.env.OPENROUTER_DEMO_COMPARE_MODEL ?? "google/gemma-3-27b-it:free";
 
 const config: AppConfig = {
   generators: [
@@ -56,7 +64,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "GOOGLE_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
-      enabled: true,
+      enabled: !demoProfile,
     },
     {
       id: "xAI-grok",
@@ -78,7 +86,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "OPENROUTER_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
-      enabled: true,
+      enabled: !demoProfile,
     },
     {
       id: "grok",
@@ -88,7 +96,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "OPENROUTER_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
-      enabled: true,
+      enabled: !demoProfile,
     },
     {
       id: "mistral",
@@ -100,6 +108,30 @@ const config: AppConfig = {
       temperature: 0.3,
       enabled: false,
     },
+    ...(demoProfile
+      ? [
+          {
+            id: "openrouter-demo-primary",
+            name: "OpenRouter Demo Primary",
+            provider: "openrouter" as const,
+            model: openRouterDemoPrimaryModel,
+            apiKeyEnvVar: "OPENROUTER_API_KEY",
+            maxTokens: 4096,
+            temperature: 0.3,
+            enabled: true,
+          },
+          {
+            id: "openrouter-demo-compare",
+            name: "OpenRouter Demo Compare",
+            provider: "openrouter" as const,
+            model: openRouterDemoCompareModel,
+            apiKeyEnvVar: "OPENROUTER_COMPARE_API_KEY",
+            maxTokens: 4096,
+            temperature: 0.3,
+            enabled: true,
+          },
+        ]
+      : []),
   ],
 
   judges: [
@@ -133,7 +165,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "GOOGLE_API_KEY",
       maxTokens: 16384,
       temperature: 0.2,
-      enabled: true,
+      enabled: !demoProfile,
     },
     {
       id: "grok-4.1-judge",
@@ -143,7 +175,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "XAI_API_KEY",
       maxTokens: 2048,
       temperature: 0.2,
-      enabled: true,
+      enabled: !demoProfile,
     },
     {
       id: "grok-3-judge",
@@ -163,7 +195,7 @@ const config: AppConfig = {
       apiKeyEnvVar: "OPENROUTER_API_KEY",
       maxTokens: 2800,
       temperature: 0.3,
-      enabled: true,
+      enabled: !demoProfile,
     },
     {
       id: "llama-judge",
@@ -173,8 +205,32 @@ const config: AppConfig = {
       apiKeyEnvVar: "OPENROUTER_API_KEY",
       maxTokens: 4096,
       temperature: 0.3,
-      enabled: true,
+      enabled: !demoProfile,
     },
+    ...(demoProfile
+      ? [
+          {
+            id: "openrouter-demo-primary-judge",
+            name: "OpenRouter Demo Primary (Judge)",
+            provider: "openrouter" as const,
+            model: openRouterDemoPrimaryModel,
+            apiKeyEnvVar: "OPENROUTER_API_KEY",
+            maxTokens: 4096,
+            temperature: 0.2,
+            enabled: true,
+          },
+          {
+            id: "openrouter-demo-compare-judge",
+            name: "OpenRouter Demo Compare (Judge)",
+            provider: "openrouter" as const,
+            model: openRouterDemoCompareModel,
+            apiKeyEnvVar: "OPENROUTER_COMPARE_API_KEY",
+            maxTokens: 4096,
+            temperature: 0.2,
+            enabled: true,
+          },
+        ]
+      : []),
   ],
 
   langfuse: {

@@ -19,7 +19,7 @@ import fs from "fs/promises";
 import path from "path";
 
 import appConfig from "../src/lib/config";
-import { initTracing, flushTracing } from "../src/lib/llm";
+import { initTracing, flushTracing, shouldUseLangfuse } from "../src/lib/llm";
 import { readRevision, urlToSlug } from "../src/lib/storage";
 import { runExperiment, runJudgeOnly, printSummary, resolvePrompt } from "./run-experiment";
 import type { ExperimentConfig, ExperimentResult } from "./run-experiment";
@@ -244,7 +244,7 @@ async function main() {
   const sourceRevision =
     sourceRevFlagIdx !== -1 ? parseInt(args[sourceRevFlagIdx + 1], 10) : undefined;
 
-  if (!dryRun) initTracing();
+  if (!dryRun && shouldUseLangfuse()) initTracing();
 
   let protocol: ResearchProtocol;
   try {

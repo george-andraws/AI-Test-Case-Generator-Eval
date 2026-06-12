@@ -1,5 +1,6 @@
 import { context, SpanStatusCode, trace } from "@opentelemetry/api";
-import { getTracer } from "./tracing";
+import crypto from "crypto";
+import { getTracer, shouldUseLangfuse } from "./tracing";
 import { callAnthropic } from "./anthropic";
 import { callOpenAI } from "./openai";
 import { callGoogle } from "./google";
@@ -8,7 +9,7 @@ import { callOpenRouter } from "./openrouter";
 import type { LLMRequest, LLMResponse } from "./types";
 
 export type { LLMRequest, LLMResponse, LLMImage, TokenUsage, TraceContext } from "./types";
-export { initTracing, flushTracing, flushSpans, getLangfuseClient } from "./tracing";
+export { initTracing, flushTracing, flushSpans, getLangfuseClient, shouldUseLangfuse } from "./tracing";
 export { scoreTrace } from "./scores";
 export type { ScoreParams, ScoreSource } from "./scores";
 
@@ -19,6 +20,11 @@ export type { ScoreParams, ScoreSource } from "./scores";
  * and revision. The returned `traceId` can be used later to attach scores.
  */
 export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
+  if (!shouldUseLangfuse(req.langfuseEnabled)) {
+    const response = await callAdapter(req);
+    return { ...response, traceId: crypto.randomUUID() };
+  }
+
   const tracer = getTracer();
   const ctx = req.traceContext;
   const spanName = ctx?.traceName ?? `${req.provider}.chat`;
@@ -68,20 +74,7 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
 
   try {
     response = await context.with(spanCtx, async () => {
-      switch (req.provider) {
-        case "anthropic":
-          return callAnthropic(req);
-        case "openai":
-          return callOpenAI(req);
-        case "google":
-          return callGoogle(req);
-        case "grok":
-          return callGrok(req);
-        case "openrouter":
-          return callOpenRouter(req);
-        default:
-          throw new Error(`Unknown provider: ${req.provider}`);
-      }
+      return callAdapter(req);
     });
   } catch (err) {
     span.setStatus({
@@ -109,4 +102,21 @@ export async function callLLM(req: LLMRequest): Promise<LLMResponse> {
 
   const traceId = span.spanContext().traceId;
   return { ...response, traceId };
+}
+
+function callAdapter(req: LLMRequest): Promise<Omit<LLMResponse, "traceId">> {
+  switch (req.provider) {
+    case "anthropic":
+      return callAnthropic(req);
+    case "openai":
+      return callOpenAI(req);
+    case "google":
+      return callGoogle(req);
+    case "grok":
+      return callGrok(req);
+    case "openrouter":
+      return callOpenRouter(req);
+    default:
+      throw new Error(`Unknown provider: ${req.provider}`);
+  }
 }

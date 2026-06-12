@@ -12,6 +12,7 @@ jest.mock('../../../src/lib/llm/tracing', () => ({
   getTracer: jest.fn(() => ({
     startSpan: jest.fn(() => mockSpan),
   })),
+  shouldUseLangfuse: jest.fn(() => true),
   initTracing: jest.fn(),
   flushSpans: jest.fn(),
   flushTracing: jest.fn(),
@@ -58,12 +59,14 @@ import { callOpenAI } from '../../../src/lib/llm/openai';
 import { callGoogle } from '../../../src/lib/llm/google';
 import { callGrok } from '../../../src/lib/llm/grok';
 import { callOpenRouter } from '../../../src/lib/llm/openrouter';
+import { shouldUseLangfuse } from '../../../src/lib/llm/tracing';
 
 const mockCallAnthropic = callAnthropic as jest.Mock;
 const mockCallOpenAI = callOpenAI as jest.Mock;
 const mockCallGoogle = callGoogle as jest.Mock;
 const mockCallGrok = callGrok as jest.Mock;
 const mockCallOpenRouter = callOpenRouter as jest.Mock;
+const mockShouldUseLangfuse = shouldUseLangfuse as jest.Mock;
 
 const baseRequest: LLMRequest = {
   provider: 'anthropic',
@@ -86,6 +89,7 @@ describe('callLLM router', () => {
     mockSpan.setStatus.mockReturnThis();
     mockSpan.end.mockReturnThis();
     mockSpan.spanContext.mockReturnValue({ traceId: 'abc123def456' });
+    mockShouldUseLangfuse.mockReturnValue(true);
   });
 
   test("provider='anthropic' → callAnthropic called, callOpenAI/callGoogle not called", async () => {
@@ -137,6 +141,14 @@ describe('callLLM router', () => {
     mockSpan.spanContext.mockReturnValue({ traceId: 'myfaketraceid' });
     const result = await callLLM({ ...baseRequest, provider: 'anthropic' });
     expect(result.traceId).toBe('myfaketraceid');
+  });
+
+  test('langfuse disabled → adapter still runs and no span is created', async () => {
+    mockShouldUseLangfuse.mockReturnValue(false);
+    const result = await callLLM({ ...baseRequest, provider: 'anthropic', langfuseEnabled: false });
+    expect(mockCallAnthropic).toHaveBeenCalledTimes(1);
+    expect(mockSpan.setAttribute).not.toHaveBeenCalled();
+    expect(result.traceId).toEqual(expect.any(String));
   });
 
   test('all LLMRequest fields passed to adapter', async () => {

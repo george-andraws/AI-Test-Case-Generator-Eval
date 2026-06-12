@@ -87,4 +87,34 @@ describe('config', () => {
   test('at least one judge defined', () => {
     expect(config.judges.length).toBeGreaterThanOrEqual(1);
   });
+
+  test('demo model profile enables two OpenRouter demo generators and judges with separate keys', () => {
+    const oldEnv = process.env;
+    jest.resetModules();
+    process.env = {
+      ...oldEnv,
+      NEXT_PUBLIC_MODEL_PROFILE: 'demo',
+      OPENROUTER_DEMO_PRIMARY_MODEL: 'provider/primary:free',
+      OPENROUTER_DEMO_COMPARE_MODEL: 'provider/compare:free',
+    };
+
+    const demoConfig = require('../../src/lib/config').default as typeof config;
+    const enabledGenerators = demoConfig.generators.filter((g) => g.enabled);
+    const enabledJudges = demoConfig.judges.filter((j) => j.enabled);
+
+    expect(enabledGenerators.map((g) => g.id)).toEqual([
+      'openrouter-demo-primary',
+      'openrouter-demo-compare',
+    ]);
+    expect(enabledJudges.map((j) => j.id)).toEqual([
+      'openrouter-demo-primary-judge',
+      'openrouter-demo-compare-judge',
+    ]);
+    expect(enabledGenerators[0].model).toBe('provider/primary:free');
+    expect(enabledGenerators[0].apiKeyEnvVar).toBe('OPENROUTER_API_KEY');
+    expect(enabledGenerators[1].model).toBe('provider/compare:free');
+    expect(enabledGenerators[1].apiKeyEnvVar).toBe('OPENROUTER_COMPARE_API_KEY');
+
+    process.env = oldEnv;
+  });
 });

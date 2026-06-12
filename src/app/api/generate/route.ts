@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import config from "@/lib/config";
 import { callLLM, flushSpans } from "@/lib/llm";
 import type { LLMImage } from "@/lib/llm";
+import { applyDemoSessionCookie, getDemoSession } from "@/lib/demo-session";
+import { enforceDemoRateLimit } from "@/lib/demo-rate-limit";
 
 export const maxDuration = 120;
 
@@ -13,6 +15,7 @@ interface GenerateRequestBody {
   modelId?: string;
   /** Optional screenshots to include as visual context for each model. */
   images?: LLMImage[];
+  langfuseEnabled?: boolean;
 }
 
 interface ModelResult {
@@ -26,6 +29,13 @@ interface ModelResult {
 
 export async function POST(req: NextRequest) {
   try {
+    const session = getDemoSession(req);
+    const rateLimitResponse = await enforceDemoRateLimit(req, "generate", session?.id);
+    if (rateLimitResponse) {
+      applyDemoSessionCookie(rateLimitResponse, session);
+      return rateLimitResponse;
+    }
+
     let body: GenerateRequestBody;
     try {
       body = await req.json();
@@ -33,7 +43,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { url, testMethodology, productRequirements, modelId, images } = body;
+    const { url, testMethodology, productRequirements, modelId, images, langfuseEnabled } = body;
     if (!url || !testMethodology || !productRequirements) {
       return NextResponse.json(
         { error: "Missing required fields: url, testMethodology, productRequirements" },
@@ -71,6 +81,7 @@ Based on the above requirements, generate comprehensive test cases for this appl
       callLLM({
         provider: model.provider,
         model: model.model,
+        apiKeyEnvVar: model.apiKeyEnvVar,
         systemPrompt: testMethodology,
         userPrompt,
         maxTokens: model.maxTokens,
@@ -82,6 +93,7 @@ Based on the above requirements, generate comprehensive test cases for this appl
           url,
           tags: ["generate", model.id],
         },
+        langfuseEnabled,
       }).then(
         (res): [string, ModelResult] => [
           model.id,
@@ -116,7 +128,9 @@ Based on the above requirements, generate comprehensive test cases for this appl
     });
 
     await flushSpans();
-    return NextResponse.json({ results });
+    const response = NextResponse.json({ results });
+    applyDemoSessionCookie(response, session);
+    return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });

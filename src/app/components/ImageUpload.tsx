@@ -33,6 +33,11 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+function imageSrc(filePath: string): string {
+  if (/^https?:\/\//.test(filePath)) return filePath;
+  return `/api/upload?path=${encodeURIComponent(filePath)}`;
+}
+
 export function ImageUpload({ images, onChange, historicPaths, disabled }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -121,7 +126,7 @@ export function ImageUpload({ images, onChange, historicPaths, disabled }: Props
           {historicPaths?.map((filePath, i) => (
             <div key={`hist-${i}`} className="relative flex-shrink-0">
               <img
-                src={`/api/upload?path=${encodeURIComponent(filePath)}`}
+                src={imageSrc(filePath)}
                 alt={filePath}
                 className="h-20 w-20 rounded border border-gray-200 object-cover"
               />

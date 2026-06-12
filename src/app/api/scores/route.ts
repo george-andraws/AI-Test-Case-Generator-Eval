@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scoreTrace } from "@/lib/llm";
+import { applyDemoSessionCookie, getDemoSession } from "@/lib/demo-session";
+import { enforceDemoRateLimit } from "@/lib/demo-rate-limit";
 
 interface ScoreEntry {
   score: number;
@@ -8,10 +10,18 @@ interface ScoreEntry {
 
 interface ScoresRequestBody {
   scores: Record<string, ScoreEntry>;
+  langfuseEnabled?: boolean;
 }
 
 export async function POST(req: NextRequest) {
   try {
+    const session = getDemoSession(req);
+    const rateLimitResponse = await enforceDemoRateLimit(req, "scores", session?.id);
+    if (rateLimitResponse) {
+      applyDemoSessionCookie(rateLimitResponse, session);
+      return rateLimitResponse;
+    }
+
     let body: ScoresRequestBody;
     try {
       body = await req.json();
@@ -19,7 +29,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { scores } = body;
+    const { scores, langfuseEnabled } = body;
     if (!scores || typeof scores !== "object") {
       return NextResponse.json(
         { success: false, error: "Missing required field: scores" },
@@ -35,11 +45,13 @@ export async function POST(req: NextRequest) {
           value: entry.score,
           comment: `Human score for model: ${modelId}`,
           source: "human",
-        })
+        }, { enabled: langfuseEnabled })
       )
     );
 
-    return NextResponse.json({ success: true });
+    const response = NextResponse.json({ success: true });
+    applyDemoSessionCookie(response, session);
+    return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ success: false, error: message }, { status: 500 });

@@ -214,6 +214,20 @@ describe('POST /api/upload', () => {
     expect(res.status).toBe(400);
   });
 
+  test('oversized image → 400', async () => {
+    const oversized = {
+      ...makeMockFile('huge.png', 'image/png'),
+      size: 5 * 1024 * 1024 + 1,
+    };
+    const req = makePostRequest({
+      url: 'http://test.com',
+      revision: '1',
+      images: [oversized],
+    });
+    const res = await POST(req as any);
+    expect(res.status).toBe(400);
+  });
+
   test('formData() throws → 400', async () => {
     const res = await POST(makeThrowingFormDataRequest() as any);
     expect(res.status).toBe(400);

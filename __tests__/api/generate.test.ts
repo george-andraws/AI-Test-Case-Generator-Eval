@@ -183,7 +183,22 @@ describe('POST /api/generate', () => {
       expect.objectContaining({
         provider: 'anthropic',
         model: 'claude-sonnet-4-20250514',
+        apiKeyEnvVar: 'ANTHROPIC_API_KEY',
       })
+    );
+  });
+
+  test('langfuseEnabled flag is passed to callLLM', async () => {
+    const req = makeRequest({
+      url: 'http://test.com',
+      testMethodology: 'Test methodology',
+      productRequirements: 'Product requirements',
+      modelId: 'claude',
+      langfuseEnabled: false,
+    });
+    await POST(req as any);
+    expect(mockCallLLM).toHaveBeenCalledWith(
+      expect.objectContaining({ langfuseEnabled: false })
     );
   });
 

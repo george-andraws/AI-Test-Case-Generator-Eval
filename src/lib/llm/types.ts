@@ -21,6 +21,8 @@ export interface LLMImage {
 export interface LLMRequest {
   provider: Provider;
   model: string;
+  /** Env var containing the provider API key. Defaults to the provider adapter's standard key. */
+  apiKeyEnvVar?: string;
   systemPrompt: string;
   userPrompt: string;
   maxTokens: number;
@@ -29,6 +31,8 @@ export interface LLMRequest {
   images?: LLMImage[];
   /** Optional tracing context — every field ends up in Langfuse. */
   traceContext?: TraceContext;
+  /** When false, skip Langfuse tracing for this call. */
+  langfuseEnabled?: boolean;
 }
 
 export interface TokenUsage {

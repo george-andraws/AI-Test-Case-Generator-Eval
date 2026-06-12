@@ -8,6 +8,8 @@ const tsJestGlobals = {
   },
 };
 
+const ignoredBuildPaths = ['<rootDir>/.next/'];
+
 const config: Config = {
   projects: [
     {
@@ -19,6 +21,8 @@ const config: Config = {
         '<rootDir>/__tests__/lib/**/*.test.ts',
         '<rootDir>/__tests__/scripts/**/*.test.ts',
       ],
+      testPathIgnorePatterns: ignoredBuildPaths,
+      modulePathIgnorePatterns: ignoredBuildPaths,
       moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
       clearMocks: true,
       ...tsJestGlobals,
@@ -28,6 +32,8 @@ const config: Config = {
       preset: 'ts-jest',
       testEnvironment: 'jest-environment-jsdom',
       testMatch: ['<rootDir>/__tests__/components/**/*.test.tsx'],
+      testPathIgnorePatterns: ignoredBuildPaths,
+      modulePathIgnorePatterns: ignoredBuildPaths,
       moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
       clearMocks: true,
       ...tsJestGlobals,

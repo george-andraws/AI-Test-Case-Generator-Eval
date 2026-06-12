@@ -1,5 +1,8 @@
 import fs from "fs/promises";
 import path from "path";
+import { Redis } from "@upstash/redis";
+import type { StorageContext } from "@/lib/demo-session";
+import { DEMO_SESSION_TTL_SECONDS, isDemoMode } from "@/lib/runtime";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,6 +22,7 @@ export interface RevisionData {
   };
   revisionNotes: string;
   images: string[]; // relative paths to screenshot files (Tier 2, empty for now)
+  langfuseEnabled?: boolean;
   configSnapshot: ConfigSnapshot;
   generations: {
     [modelId: string]: {
@@ -48,6 +52,27 @@ export interface RevisionData {
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
 const DATA_DIR = path.join(process.cwd(), "data");
+let redis: Redis | null = null;
+
+function getRedis(): Redis {
+  if (!redis) redis = Redis.fromEnv();
+  return redis;
+}
+
+function requireDemoContext(context: StorageContext | undefined): StorageContext {
+  if (!context?.sessionId) {
+    throw new Error("Demo storage requires a session");
+  }
+  return context;
+}
+
+function revisionsKey(context: StorageContext, slug: string): string {
+  return `tcet:session:${context.sessionId}:revisions:${slug}`;
+}
+
+function productsKey(context: StorageContext): string {
+  return `tcet:session:${context.sessionId}:products`;
+}
 
 /**
  * Converts an arbitrary URL into a safe filename stem.
@@ -74,7 +99,16 @@ export async function ensureDataDir(): Promise<void> {
 // ── Read ──────────────────────────────────────────────────────────────────────
 
 /** Returns all revisions for the given URL slug, or null if the file doesn't exist. */
-export async function readRevisions(slug: string): Promise<RevisionData[] | null> {
+export async function readRevisions(
+  slug: string,
+  context?: StorageContext
+): Promise<RevisionData[] | null> {
+  if (isDemoMode()) {
+    const demoContext = requireDemoContext(context);
+    const revisions = await getRedis().get<RevisionData[]>(revisionsKey(demoContext, slug));
+    return revisions ?? null;
+  }
+
   try {
     const raw = await fs.readFile(slugToFilePath(slug), "utf-8");
     return JSON.parse(raw) as RevisionData[];
@@ -87,9 +121,10 @@ export async function readRevisions(slug: string): Promise<RevisionData[] | null
 /** Returns a single revision by number, or null if not found. */
 export async function readRevision(
   slug: string,
-  revision: number
+  revision: number,
+  context?: StorageContext
 ): Promise<RevisionData | null> {
-  const revisions = await readRevisions(slug);
+  const revisions = await readRevisions(slug, context);
   if (!revisions) return null;
   return revisions.find((r) => r.revision === revision) ?? null;
 }
@@ -102,8 +137,33 @@ export async function readRevision(
  * Returns the assigned revision number.
  */
 export async function saveRevision(
-  data: Omit<RevisionData, "revision" | "timestamp">
+  data: Omit<RevisionData, "revision" | "timestamp">,
+  context?: StorageContext
 ): Promise<number> {
+  if (isDemoMode()) {
+    const demoContext = requireDemoContext(context);
+    const slug = urlToSlug(data.url);
+    const key = revisionsKey(demoContext, slug);
+    const existing = (await readRevisions(slug, demoContext)) ?? [];
+    const revision = existing.length + 1;
+    const entry: RevisionData = {
+      ...data,
+      revision,
+      timestamp: new Date().toISOString(),
+    };
+
+    const updated = [...existing, entry];
+    const redis = getRedis();
+    await redis.set(key, updated, { ex: DEMO_SESSION_TTL_SECONDS });
+    await upsertDemoProduct(demoContext, {
+      url: data.url,
+      slug,
+      revisionCount: updated.length,
+    });
+
+    return revision;
+  }
+
   await ensureDataDir();
 
   const slug = urlToSlug(data.url);
@@ -143,19 +203,44 @@ export interface RevisionPatch {
 export async function updateRevision(
   slug: string,
   revision: number,
-  patch: RevisionPatch
+  patch: RevisionPatch,
+  context?: StorageContext
 ): Promise<void> {
+  if (isDemoMode()) {
+    const demoContext = requireDemoContext(context);
+    const revisions = await readRevisions(slug, demoContext);
+    if (!revisions) throw new Error(`No data found for slug: ${slug}`);
+
+    const updated = mergeRevisionPatch(revisions, slug, revision, patch);
+    await getRedis().set(revisionsKey(demoContext, slug), updated, {
+      ex: DEMO_SESSION_TTL_SECONDS,
+    });
+    return;
+  }
+
   await ensureDataDir();
 
   const revisions = await readRevisions(slug);
   if (!revisions) throw new Error(`No data found for slug: ${slug}`);
 
+  const updated = mergeRevisionPatch(revisions, slug, revision, patch);
+
+  await fs.writeFile(slugToFilePath(slug), JSON.stringify(updated, null, 2), "utf-8");
+}
+
+function mergeRevisionPatch(
+  revisions: RevisionData[],
+  slug: string,
+  revision: number,
+  patch: RevisionPatch
+): RevisionData[] {
   const idx = revisions.findIndex((r) => r.revision === revision);
   if (idx === -1) throw new Error(`Revision ${revision} not found for slug: ${slug}`);
 
   const existing = revisions[idx];
+  const updated = [...revisions];
 
-  revisions[idx] = {
+  updated[idx] = {
     ...existing,
     ...(patch.generations !== undefined && {
       generations: { ...existing.generations, ...patch.generations },
@@ -169,7 +254,7 @@ export async function updateRevision(
     }),
   };
 
-  await fs.writeFile(slugToFilePath(slug), JSON.stringify(revisions, null, 2), "utf-8");
+  return updated;
 }
 
 function mergeJudgeScores(
@@ -193,7 +278,12 @@ export interface ProductSummary {
 }
 
 /** Reads the data/ directory and returns a summary of every stored product. */
-export async function listProducts(): Promise<ProductSummary[]> {
+export async function listProducts(context?: StorageContext): Promise<ProductSummary[]> {
+  if (isDemoMode()) {
+    const demoContext = requireDemoContext(context);
+    return (await getRedis().get<ProductSummary[]>(productsKey(demoContext))) ?? [];
+  }
+
   await ensureDataDir();
 
   const entries = await fs.readdir(DATA_DIR);
@@ -212,4 +302,15 @@ export async function listProducts(): Promise<ProductSummary[]> {
   return summaries
     .filter((s): s is PromiseFulfilledResult<ProductSummary> => s.status === "fulfilled")
     .map((s) => s.value);
+}
+
+async function upsertDemoProduct(
+  context: StorageContext,
+  product: ProductSummary
+): Promise<void> {
+  const key = productsKey(context);
+  const existing = (await getRedis().get<ProductSummary[]>(key)) ?? [];
+  const next = existing.filter((p) => p.slug !== product.slug);
+  next.push(product);
+  await getRedis().set(key, next, { ex: DEMO_SESSION_TTL_SECONDS });
 }

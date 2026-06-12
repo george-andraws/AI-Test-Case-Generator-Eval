@@ -5,8 +5,8 @@
 import { config as loadEnv } from "dotenv";
 loadEnv({ path: ".env.local" });
 
-// initTracing must be called before any callLLM invocation
-import { initTracing, callLLM, flushTracing } from "../src/lib/llm";
+// initTracing is called only when Langfuse is configured/enabled.
+import { initTracing, callLLM, flushTracing, shouldUseLangfuse } from "../src/lib/llm";
 import type { LLMRequest } from "../src/lib/llm";
 
 const SYSTEM_PROMPT = "You are a concise assistant. Always reply in one sentence.";
@@ -94,8 +94,8 @@ const requests: LLMRequest[] = [
 ];
 
 async function main() {
-  initTracing();
-  console.log("Testing LLM adapters with Langfuse tracing...\n");
+  if (shouldUseLangfuse()) initTracing();
+  console.log("Testing LLM adapters...\n");
 
   for (const req of requests) {
     process.stdout.write(`[${req.provider}/${req.model}] ... `);

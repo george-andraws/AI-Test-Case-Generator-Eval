@@ -98,6 +98,8 @@ export default function Page() {
 
   // ── Judge running ─────────────────────────────────────────────────────────
   const [overwriteExisting, setOverwriteExisting] = useState(false);
+  const [langfuseEnabled, setLangfuseEnabled] = useState(false);
+  const [langfuseAvailable, setLangfuseAvailable] = useState(false);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const enabledGenerators = config.generators.filter((m) => m.enabled);
@@ -143,6 +145,17 @@ export default function Page() {
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
+  useEffect(() => {
+    fetch("/api/runtime")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        setLangfuseAvailable(Boolean(data.langfuseAvailable));
+        setLangfuseEnabled(Boolean(data.langfuseDefaultEnabled));
+      })
+      .catch(() => {});
+  }, []);
+
   // When revisions load, default to the latest
   useEffect(() => {
     if (revisions.length > 0) {
@@ -167,6 +180,9 @@ export default function Page() {
     });
     setHistoricImagePaths(rev.images);
     setImages([]);
+    if (typeof rev.langfuseEnabled === "boolean") {
+      setLangfuseEnabled(rev.langfuseEnabled);
+    }
     setSubmitStatus("idle");
     setSubmitError(null);
 
@@ -356,6 +372,7 @@ export default function Page() {
             testMethodology: capturedForm.testMethodology,
             productRequirements: capturedForm.productRequirements,
             modelId: model.id,
+            langfuseEnabled,
             images: capturedImages.length > 0
               ? capturedImages.map(({ base64, mimeType }) => ({ base64, mimeType }))
               : undefined,
@@ -431,6 +448,7 @@ export default function Page() {
           },
           revisionNotes: capturedForm.revisionNotes,
           images: [],
+          langfuseEnabled,
           configSnapshot: {
             generators: enabledGenerators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
             judges: enabledJudges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
@@ -490,6 +508,7 @@ export default function Page() {
               url: capturedForm.url,
               productRequirements: capturedForm.productRequirements,
               judgePrompt: capturedForm.judgePrompt,
+              langfuseEnabled,
               generations: { [model.id]: { modelName: model.name, output: result.output } },
               images: capturedImages.length > 0
                 ? capturedImages.map(({ base64, mimeType }) => ({ base64, mimeType }))
@@ -585,15 +604,17 @@ export default function Page() {
     }
 
     let langfuseOk = true;
-    try {
-      const res = await fetch("/api/scores", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scores: langfuseScores }),
-      });
-      if (!res.ok) langfuseOk = false;
-    } catch {
-      langfuseOk = false;
+    if (langfuseEnabled) {
+      try {
+        const res = await fetch("/api/scores", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scores: langfuseScores, langfuseEnabled }),
+        });
+        if (!res.ok) langfuseOk = false;
+      } catch {
+        langfuseOk = false;
+      }
     }
 
     // Build human scores map
@@ -655,6 +676,7 @@ export default function Page() {
             },
             revisionNotes: form.revisionNotes,
             images: [],
+            langfuseEnabled,
             configSnapshot: {
               generators: enabledGenerators.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
               judges: enabledJudges.map(({ id, name, model, provider }) => ({ id, name, model, provider })),
@@ -713,12 +735,21 @@ export default function Page() {
     // Capture form values
     const capturedForm = form;
     const capturedImages = images;
+    type ManualJudgeResult = {
+      success?: boolean;
+      score?: number;
+      feedback?: string;
+      rawData?: Record<string, unknown>;
+      selfEvaluation?: boolean;
+      langfuseTraceId?: string;
+      error?: string;
+    };
 
     // Run judges in parallel for each generator
     const judgePromises = judgesToRun.flatMap((judge) =>
       successfulPanels
         .filter((panel) => overwriteExisting || !judgeResults[judge.id]?.[panel.id] || judgeResults[judge.id][panel.id].status !== "success")
-        .map(async (panel): Promise<{ judgeId: string; generatorId: string; result: any }> => {
+        .map(async (panel): Promise<{ judgeId: string; generatorId: string; result: ManualJudgeResult | null }> => {
           try {
             const res = await fetch("/api/judge", {
               method: "POST",
@@ -728,6 +759,7 @@ export default function Page() {
                 productRequirements: capturedForm.productRequirements,
                 judgePrompt: capturedForm.judgePrompt,
                 judgeId: judge.id,
+                langfuseEnabled,
                 generations: { [panel.id]: { modelName: panel.name, output: panel.output ?? "" } },
                 images: capturedImages.length > 0
                   ? capturedImages.map(({ base64, mimeType }) => ({ base64, mimeType }))
@@ -775,16 +807,22 @@ export default function Page() {
     if (currentRevisionId !== null) {
       const judgesScoresPatch: RevisionData["scores"]["judges"] = {};
       for (const outcome of judgeOutcomes) {
-        if (outcome.status === "fulfilled" && outcome.value.result?.success) {
-          const { judgeId, generatorId, result } = outcome.value;
-          if (!judgesScoresPatch[judgeId]) judgesScoresPatch[judgeId] = {};
-          judgesScoresPatch[judgeId][generatorId] = {
-            score: result.score,
-            feedback: result.feedback,
-            langfuseTraceId: result.langfuseTraceId,
-            rawData: result.rawData,
-          };
-        }
+        if (outcome.status !== "fulfilled") continue;
+        const { judgeId, generatorId, result } = outcome.value;
+        if (
+          !result?.success ||
+          result.score === undefined ||
+          !result.feedback ||
+          !result.langfuseTraceId
+        ) continue;
+
+        if (!judgesScoresPatch[judgeId]) judgesScoresPatch[judgeId] = {};
+        judgesScoresPatch[judgeId][generatorId] = {
+          score: result.score,
+          feedback: result.feedback,
+          langfuseTraceId: result.langfuseTraceId,
+          rawData: result.rawData,
+        };
       }
       if (Object.keys(judgesScoresPatch).length > 0) {
         fetch("/api/data", {
@@ -934,6 +972,16 @@ export default function Page() {
               />
               <p className="mt-1 text-xs text-gray-400">System prompt sent to judge models.</p>
             </div>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={langfuseEnabled}
+                disabled={isRunning || !langfuseAvailable}
+                onChange={(e) => setLangfuseEnabled(e.target.checked)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+              />
+              Send traces and scores to Langfuse
+            </label>
           </div>
 
           {/* Generate button */}
@@ -1025,12 +1073,18 @@ export default function Page() {
                     <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                   )}
                   {submitStatus === "done"
-                    ? "Scores submitted ✓"
+                    ? langfuseEnabled
+                      ? "Scores submitted ✓"
+                      : "Scores saved ✓"
                     : submitStatus === "submitting"
                     ? "Submitting…"
                     : scoresWereSubmitted
-                    ? "Update scores in Langfuse"
-                    : "Submit scores to Langfuse"}
+                    ? langfuseEnabled
+                      ? "Update scores in Langfuse"
+                      : "Update saved scores"
+                    : langfuseEnabled
+                    ? "Submit scores to Langfuse"
+                    : "Save human scores"}
                 </button>
 
                 {scoresWereSubmitted && submitStatus === "idle" && (

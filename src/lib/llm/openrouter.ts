@@ -4,8 +4,14 @@ import type { LLMRequest, LLMResponse } from "./types";
 type AdapterResponse = Omit<LLMResponse, "traceId">;
 
 export async function callOpenRouter(req: LLMRequest): Promise<AdapterResponse> {
+  const apiKeyEnvVar = req.apiKeyEnvVar ?? "OPENROUTER_API_KEY";
+  const apiKey = process.env[apiKeyEnvVar];
+  if (!apiKey) {
+    throw new Error(`OpenRouter API key env var not set: ${apiKeyEnvVar}`);
+  }
+
   const client = new OpenAI({
-    apiKey: process.env.OPENROUTER_API_KEY,
+    apiKey,
     baseURL: "https://openrouter.ai/api/v1",
     defaultHeaders: {
       "HTTP-Referer": "http://localhost:3000",
