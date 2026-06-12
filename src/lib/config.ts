@@ -31,6 +31,16 @@ const openRouterDemoPrimaryModel =
 const openRouterDemoCompareModel =
   process.env.OPENROUTER_DEMO_COMPARE_MODEL ?? "google/gemma-3-27b-it:free";
 
+function modelDisplayName(modelId: string): string {
+  const withoutFreeSuffix = modelId.replace(/:free$/, "");
+  const modelName = withoutFreeSuffix.split("/").pop() ?? withoutFreeSuffix;
+  return modelName
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 const config: AppConfig = {
   generators: [
     // ── Direct adapters — primary proprietary models ───────────────────────
@@ -112,7 +122,7 @@ const config: AppConfig = {
       ? [
           {
             id: "openrouter-demo-primary",
-            name: "OpenRouter Demo Primary",
+            name: modelDisplayName(openRouterDemoPrimaryModel),
             provider: "openrouter" as const,
             model: openRouterDemoPrimaryModel,
             apiKeyEnvVar: "OPENROUTER_API_KEY",
@@ -122,7 +132,7 @@ const config: AppConfig = {
           },
           {
             id: "openrouter-demo-compare",
-            name: "OpenRouter Demo Compare",
+            name: modelDisplayName(openRouterDemoCompareModel),
             provider: "openrouter" as const,
             model: openRouterDemoCompareModel,
             apiKeyEnvVar: "OPENROUTER_COMPARE_API_KEY",
@@ -211,7 +221,7 @@ const config: AppConfig = {
       ? [
           {
             id: "openrouter-demo-primary-judge",
-            name: "OpenRouter Demo Primary (Judge)",
+            name: `${modelDisplayName(openRouterDemoPrimaryModel)} (Judge)`,
             provider: "openrouter" as const,
             model: openRouterDemoPrimaryModel,
             apiKeyEnvVar: "OPENROUTER_API_KEY",
@@ -221,7 +231,7 @@ const config: AppConfig = {
           },
           {
             id: "openrouter-demo-compare-judge",
-            name: "OpenRouter Demo Compare (Judge)",
+            name: `${modelDisplayName(openRouterDemoCompareModel)} (Judge)`,
             provider: "openrouter" as const,
             model: openRouterDemoCompareModel,
             apiKeyEnvVar: "OPENROUTER_COMPARE_API_KEY",

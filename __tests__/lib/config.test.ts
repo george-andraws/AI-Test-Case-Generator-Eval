@@ -111,8 +111,12 @@ describe('config', () => {
       'openrouter-demo-compare-judge',
     ]);
     expect(enabledGenerators[0].model).toBe('provider/primary:free');
+    expect(enabledGenerators[0].name).toBe('Primary');
+    expect(enabledJudges[0].name).toBe('Primary (Judge)');
     expect(enabledGenerators[0].apiKeyEnvVar).toBe('OPENROUTER_API_KEY');
     expect(enabledGenerators[1].model).toBe('provider/compare:free');
+    expect(enabledGenerators[1].name).toBe('Compare');
+    expect(enabledJudges[1].name).toBe('Compare (Judge)');
     expect(enabledGenerators[1].apiKeyEnvVar).toBe('OPENROUTER_COMPARE_API_KEY');
 
     process.env = oldEnv;
