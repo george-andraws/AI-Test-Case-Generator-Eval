@@ -40,6 +40,8 @@ const EMPTY_FORM: FormState = {
   judgePrompt: "",
 };
 
+const FULL_TOOL_REPO_URL = "https://github.com/george-andraws/AI-Test-Case-Generator-Eval";
+
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
 function Label({ htmlFor, children }: { htmlFor: string; children: React.ReactNode }) {
@@ -847,6 +849,22 @@ export default function Page() {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="mx-auto max-w-screen-xl px-4 py-10 sm:px-6 lg:px-8">
+        <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950 shadow-sm">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <p>
+              <span className="font-semibold">Demo version:</span>{" "}
+              this hosted app keeps anonymous session data for one week.
+            </p>
+            <a
+              href={FULL_TOOL_REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-blue-700 underline decoration-blue-300 underline-offset-4 hover:text-blue-900"
+            >
+              View the full tool on GitHub
+            </a>
+          </div>
+        </div>
 
         {/* Header */}
         <div className="mb-8">
