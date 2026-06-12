@@ -13,19 +13,19 @@
     "research": "tsx --tsconfig tsconfig.json scripts/run-research.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
+    "@anthropic-ai/sdk": "^0.104.1",
     "@google/genai": "^1.46.0",
     "@google/generative-ai": "^0.24.1",
     "@langfuse/client": "^5.0.1",
     "@langfuse/otel": "^5.0.1",
     "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/sdk-node": "^0.213.0",
+    "@opentelemetry/sdk-node": "^0.219.0",
     "@tailwindcss/typography": "^0.5.19",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
     "@vercel/blob": "^2.4.0",
     "langfuse": "^3.38.6",
-    "next": "16.2.0",
+    "next": "^16.2.9",
     "openai": "^6.32.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -44,12 +44,15 @@
     "@types/react-dom": "^19",
     "dotenv": "^17.3.1",
     "eslint": "^9",
-    "eslint-config-next": "16.2.0",
+    "eslint-config-next": "16.2.9",
     "jest": "^30.3.0",
     "jest-environment-jsdom": "^30.3.0",
     "tailwindcss": "^4",
     "ts-jest": "^29.4.6",
     "tsx": "^4.21.0",
     "typescript": "^5"
+  },
+  "overrides": {
+    "postcss": "8.5.15"
   }
 }

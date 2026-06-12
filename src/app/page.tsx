@@ -331,7 +331,7 @@ export default function Page() {
     });
   }
 
-  // ── Generate + judge flow ─────────────────────────────────────────────────
+  // ── Generate flow ─────────────────────────────────────────────────────────
 
   async function handleGenerate() {
     setPhase("generating");
@@ -472,121 +472,7 @@ export default function Page() {
           uploadAndPatchImages(capturedForm.url, savedRevisionId, capturedImages).catch(() => {});
         }
       }
-    } catch { /* non-critical — judging proceeds regardless */ }
-
-    // ── Kick off judging ───────────────────────────────────────────────────
-    setPhase("judging");
-
-    // Initialize all judge entries as loading
-    setJudgeResults(() => {
-      const init: JudgeResultsMap = {};
-      for (const judge of enabledJudges) {
-        init[judge.id] = {};
-        for (const { model } of successful) {
-          init[judge.id][model.id] = { status: "loading" };
-        }
-      }
-      return init;
-    });
-
-    type JudgePatchEntry = {
-      judgeId: string;
-      generatorId: string;
-      score: number;
-      feedback: string;
-      rawData?: Record<string, unknown>;
-      langfuseTraceId: string;
-    };
-
-    // Fire all judge × generator combinations in parallel
-    const judgePromises = enabledJudges.flatMap((judge) =>
-      successful.map(async ({ model, result }): Promise<JudgePatchEntry | null> => {
-        try {
-          const res = await fetch("/api/judge", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              judgeId: judge.id,
-              url: capturedForm.url,
-              productRequirements: capturedForm.productRequirements,
-              judgePrompt: capturedForm.judgePrompt,
-              langfuseEnabled,
-              generations: { [model.id]: { modelName: model.name, output: result.output } },
-              images: capturedImages.length > 0
-                ? capturedImages.map(({ base64, mimeType }) => ({ base64, mimeType }))
-                : undefined,
-            }),
-          });
-          const data = await res.json();
-          const jr = res.ok ? data.results?.[judge.id]?.[model.id] : null;
-
-          setJudgeResults((prev) => ({
-            ...prev,
-            [judge.id]: {
-              ...prev[judge.id],
-              [model.id]: jr
-                ? {
-                    status: jr.success ? "success" : "error",
-                    score: jr.score,
-                    feedback: jr.feedback,
-                    rawData: jr.rawData,
-                    selfEvaluation: jr.selfEvaluation,
-                    langfuseTraceId: jr.langfuseTraceId,
-                    error: jr.error,
-                  }
-                : { status: "error", error: data.error ?? "Request failed" },
-            },
-          }));
-
-          if (jr?.success && jr.score !== undefined && jr.langfuseTraceId) {
-            return {
-              judgeId: judge.id,
-              generatorId: model.id,
-              score: jr.score,
-              feedback: jr.feedback ?? "",
-              rawData: jr.rawData,
-              langfuseTraceId: jr.langfuseTraceId,
-            };
-          }
-          return null;
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          setJudgeResults((prev) => ({
-            ...prev,
-            [judge.id]: {
-              ...prev[judge.id],
-              [model.id]: { status: "error", error: message },
-            },
-          }));
-          return null;
-        }
-      })
-    );
-
-    const judgeOutcomes = await Promise.allSettled(judgePromises);
-
-    // ── Save Point 2: Patch judge scores ──────────────────────────────────
-    if (savedRevisionId !== null) {
-      const judgesScoresPatch: RevisionData["scores"]["judges"] = {};
-      for (const outcome of judgeOutcomes) {
-        if (outcome.status === "fulfilled" && outcome.value !== null) {
-          const { judgeId, generatorId, score, feedback, rawData, langfuseTraceId } = outcome.value;
-          if (!judgesScoresPatch[judgeId]) judgesScoresPatch[judgeId] = {};
-          judgesScoresPatch[judgeId][generatorId] = { score, feedback, langfuseTraceId, rawData };
-        }
-      }
-      if (Object.keys(judgesScoresPatch).length > 0) {
-        fetch("/api/data", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: capturedForm.url,
-            revision: savedRevisionId,
-            scores: { judges: judgesScoresPatch },
-          }),
-        }).catch(() => {}); // fire-and-forget, non-critical
-      }
-    }
+    } catch { /* non-critical — generation results remain visible even if save fails */ }
 
     setPhase("done");
   }
