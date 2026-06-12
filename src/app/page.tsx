@@ -705,10 +705,6 @@ export default function Page() {
   // ── Run judges ────────────────────────────────────────────────────────────
 
   async function handleRunJudges() {
-    setPhase("judging");
-    setSubmitStatus("idle");
-    setSubmitError(null);
-
     // Determine which judges to run: enabled judges that don't have scores (or all if overwrite)
     const judgesToRun = enabledJudges.filter((judge) => {
       if (overwriteExisting) return true;
@@ -717,6 +713,10 @@ export default function Page() {
     });
 
     if (judgesToRun.length === 0) return;
+
+    setPhase("judging");
+    setSubmitStatus("idle");
+    setSubmitError(null);
 
     // Set loading state for judges being run
     setJudgeResults((prev) => {
